@@ -347,6 +347,9 @@ class AkkaParentProject(info: ProjectInfo) extends DefaultProject(info) {
     val scalatest = Dependencies.scalatest
 
     override def bndImportPackage = "javax.transaction;version=1.1" :: super.bndImportPackage.toList
+    // some tests depend on testkit, so include that and make sure it's compiled
+    override def testClasspath = super.testClasspath +++ akka_testkit.path("target") / "classes"
+    override def testCompileAction = super.testCompileAction dependsOn (akka_testkit.compile)
   }
 
   // -------------------------------------------------------------------------------------------------------------------

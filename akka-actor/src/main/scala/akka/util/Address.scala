@@ -7,9 +7,17 @@ import java.net.InetSocketAddress
 
 object Address {
   def apply(hostname: String, port: Int) = new Address(hostname, port)
+
   def apply(inetAddress: InetSocketAddress): Address = inetAddress match {
     case null => null
-    case inet => new Address(inet.getAddress.getHostAddress, inet.getPort)
+    case inet => {
+      val inetAddress = inet.getAddress
+      if (inetAddress != null) {
+        new Address(inetAddress.getHostAddress, inet.getPort)
+      } else {
+        new Address(inet.getHostName, inet.getPort)
+      }
+    }
   }
 }
 
@@ -22,6 +30,7 @@ class Address(val hostname: String, val port: Int) {
   }
 
   override def equals(that: Any): Boolean = {
+    //FIXME this doesn't always equal the same Address as the same Address (hostname or address)
     that.isInstanceOf[Address] &&
         that.asInstanceOf[Address].hostname == hostname &&
         that.asInstanceOf[Address].port == port

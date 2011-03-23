@@ -13,10 +13,12 @@ import akka.config.Config.{config, TIME_UNIT}
 import java.util.concurrent.ConcurrentHashMap
 import akka.AkkaException
 import reflect.BeanProperty
+import java.util.concurrent.atomic.AtomicReference
 
 trait RemoteModule {
   val UUID_PREFIX        = "uuid:"
-
+  type Filter = (Any => Any)
+  
   def optimizeLocalScoped_?(): Boolean //Apply optimizations for remote operations in local scope
   protected[akka] def notifyListeners(message: => Any): Unit
 
@@ -384,11 +386,45 @@ trait RemoteServerModule extends RemoteModule {
   def unregisterTypedActor(id: String): Unit
 
   /**
-  * Unregister Remote Typed Actor by specific 'id'.
-  * <p/>
-  * NOTE: You need to call this method if you have registered an actor by a custom ID.
-  */
- def unregisterTypedPerSessionActor(id: String): Unit
+   * Unregister Remote Typed Actor by specific 'id'.
+   * <p/>
+   * NOTE: You need to call this method if you have registered an actor by a custom ID.
+   */
+  def unregisterTypedPerSessionActor(id: String): Unit
+
+  /**
+   * Returns the serverFilters on the remote server endpoint. Incoming and outgoing messages to and from the remote server can be intercepted
+   * and modified with pipelines of filter functions.
+   * <pre>
+   *   // create some functions that match on RemoteMessageProtocol.Builder and return a RemoteMessageProtocol.Builder or None
+   *   // if the function wants to abort the chain and stop the message from passing through. for instance:
+   *   val function1: (Any=>Any) = {
+   *     case builder:RemoteMessageProtocol.Builder => {
+   *      // do something with builder and return builder, or None to abort chain
+   *      builder
+   *     }
+   *     case _ => None
+   *   }
+   *   // create some more functions
+   *   ...
+   *   val incomingFilters = Vector(function1, function2, ...)
+   *   // add a vector of filters (function1, 2, ...) when the server receives a remoteprotocol message
+   *   remote.serverFilters.in(incomingFilters)
+   *   // add a vector of filters when the server sends back a remoteprotocol message
+   *   remote.serverFilters.out(outgoingFilters)
+   *   // you can remove all incoming and outgoing filters with clear
+   *   remote.serverFilters.clear()
+   *   // you can chain the calls
+   *   remote.serverFilters.in(incomingFilters).out(outgoingFilters)
+   * </pre>
+   * <p/>
+   * all modifications done on the serverFilters using the Filters trait are immediately active on the current remote server that is running.
+   * If the remote server is not running yet (start has not been called), the serverFilters will become active when the server is started.
+   * The serverFilters stay available after server shutdown and will continue to be active after a server start, even if the server is started
+   * on a different address.
+   */
+  def serverFilters: Filters
+
 }
 
 trait RemoteClientModule extends RemoteModule { self: RemoteModule =>
@@ -445,6 +481,46 @@ trait RemoteClientModule extends RemoteModule { self: RemoteModule =>
    */
   def restartClientConnection(address: InetSocketAddress): Boolean
 
+  /**
+   * Access the filters on the client endpoint sending to and receiving from the address (hostname, port).
+   * Filters provides an interface to register the incoming and outgoing filters or to clear all filters
+   * registered on the client endpoint for the address (hostname, port).
+   *
+   * Incoming and outgoing messages to and from the remote client can be intercepted
+   * and modified with pipelines of filter functions.
+   * <pre>
+   *   // create some functions that match on RemoteMessageProtocol.Builder and return a RemoteMessageProtocol.Builder or None
+   *   // if the function wants to abort the chain and stop the message from passing through. for instance:
+   *   val function1: (Any=>Any) = {
+   *     case builder:RemoteMessageProtocol.Builder => {
+   *      // do something with builder and return builder, or None to abort chain
+   *      builder
+   *     }
+   *     case _ => None
+   *   }
+   *   // create some more functions
+   *   ...
+   *   val incomingFilters = Vector(function1, function2, ...)
+   *   // add a vector of filters (function1, 2, ...) when the client receives a remoteprotocol message
+   *   remote.clientFilters("server", 25220).in(incomingFilters)
+   *   // add a vector of filters when the client sends a remoteprotocol message
+   *   remote.clientFilters("server", 25220).out(outgoingFilters)
+   *   // you can remove all incoming and outgoing filters with clear
+   *   remote.clientFilters("server", 25220).clear()
+   *   // you can chain the calls
+   *   remote.clientFilters("server", 25220).in(incomingFilters).out(outgoingFilters)
+   * </pre>
+   * <p/>
+   * all modifications done on the clientFilters using the Filters trait are immediately active on the remote client for the address (hostname, port).
+   * If the remote client is not running yet, the clientFilters will become active when the remote client is used.
+   * The clientFilters stay available after client shutdown for the same address (hostname, port).
+   *
+   * @param hostname the hostname
+   * @param port the port
+   * @returns the client filters for the address
+   */
+  def clientFilters(hostname: String, port:Int): Filters
+
   /** Methods that needs to be implemented by a transport **/
 
   protected[akka] def typedActorFor[T](intfClass: Class[T], serviceId: String, implClassName: String, timeout: Long, host: String, port: Int, loader: Option[ClassLoader]): T
@@ -471,4 +547,69 @@ trait RemoteClientModule extends RemoteModule { self: RemoteModule =>
 
   @deprecated("Will be removed after 1.1")
   private[akka] def unregisterClientManagedActor(hostname: String, port: Int, uuid: Uuid): Unit
+}
+
+/**
+ * Abstraction for the filters that can be attached on a remote actor communication endpoint.
+ * Mini fluent interface to the client and server Filters, so that you can do
+ * filters.in(incoming).out(outgoing) or filters.in(incoming), filters.clear.
+ * This trait is used in remote.clientFilters and remote.serverFilters.
+ * The filters can be added to the remote side endpoint and/or the server side endpoint.
+ * <p/>
+ * On both endpoints vectors of filters can be placed on the incoming and outgoing messages.
+ * The vector of filter functions is also referred to as a pipeline. Per endpoint there are two pipelines, one incoming, one outgoing.
+ * For the complete communication between a remote client and server, there are four pipelines, client outgoing, client incoming,
+ * server incoming, server outgoing.
+ * <p/>
+ * The Filter function is a <pre> Any=>Any </pre> function which will receive a RemoteMessageProtocol.Builder and will need to return a
+ * RemoteMessageProtocol.Builder, or None if the Filter function wants to abort the chain of functions and stop the message from being sent/received.
+ * The builder can be modified in the filter and passed on to the next function in the vector by using the standard protobuf methods.
+ * This gives the opportunity to add metadata to the message or filter out certain messages or just listen in on what messages are being
+ * sent between remote client and server.
+ */
+trait Filters {
+  protected val guard = new ReadWriteGuard
+  type Filter = (Any => Any)
+  protected val _in  = new AtomicReference[Option[Vector[Filter]]](None)
+  protected val _out = new AtomicReference[Option[Vector[Filter]]](None)
+  /**
+   * should be used to update the state of the filters in the server or client module
+   */
+  private [akka] def update():Unit
+  /**
+   * should be used to clear the state of the filters in the server or client module
+   */
+  private [akka] def unregister():Unit
+
+  /**
+   * Adds a pipeline (vector of Filter functions) to the incoming/receiving side of the endpoint.
+   * Whenever an endpoint receives a message, it is first passed through the vector of filters and then passed on to
+   * the normal handling of the message at the endpoint.
+   */
+  def in(filters: Vector[Filter]): Filters =  guard withWriteGuard {
+    _in.set(Some(filters))
+    update()
+    this
+  }
+
+  /**
+   * Adds a pipeline (vector of Filter functions) to the outgoing/sending side of the filters.
+   * Whenever an endpoint sends a message, it is first passed through the vector of filters and then passed on to
+   * the normal handling of the message at the endpoint.
+   */
+  def out(filters: Vector[Filter]): Filters = guard withWriteGuard {
+    _out.set(Some(filters))
+    update()
+    this
+  }
+
+  /**
+   * Clears both the incoming and outgoing side of the filters.
+   */
+  def clear: Filters = guard withWriteGuard {
+    _in.set(None)
+    _out.set(None)
+    unregister()
+    this
+  }
 }
