@@ -86,8 +86,8 @@ abstract class MailboxSpec extends
     }
 
     //CANDIDATE FOR TESTKIT
-    def spawn[T <: AnyRef](fun: => T)(implicit within: Duration): Future[T] = {
-      val result = new DefaultCompletableFuture[T](within.length, within.unit)
+    def spawn[T <: AnyRef](fun: => T): Future[T] = {
+      val result = new DefaultCompletableFuture[T]
       val t = new Thread(new Runnable {
         def run = try {
           result.completeWithResult(fun)

@@ -11,8 +11,12 @@ import scala.Right;
 import static akka.dispatch.Futures.future;
 import static akka.dispatch.Futures.traverse;
 import static akka.dispatch.Futures.sequence;
+import akka.util.Timeout;
+import akka.util.DurationInt;
 
 public class JavaFutureTests {
+
+    Timeout to = new Timeout(new DurationInt(5).seconds());
 
     @Test public void mustBeAbleToMapAFuture() {
         Future<String> f1 = future(new Callable<String>() {
@@ -27,7 +31,7 @@ public class JavaFutureTests {
                 }
             });
 
-        assertEquals("Hello World", f2.get());
+        assertEquals("Hello World", f2.get(to));
     }
 
     // TODO: Improve this test, perhaps with an Actor
@@ -46,7 +50,7 @@ public class JavaFutureTests {
 
         Future<LinkedList<String>> futureList = sequence(listFutures);
 
-        assertEquals(futureList.get(), listExpected);
+        assertEquals(futureList.get(to), listExpected);
     }
 
 }

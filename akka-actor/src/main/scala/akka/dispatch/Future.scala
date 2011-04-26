@@ -9,6 +9,7 @@ import akka.event.EventHandler
 import akka.actor.Actor
 import akka.routing.Dispatcher
 import akka.japi.{ Procedure, Function => JFunc }
+import akka.util.Timeout
 
 import scala.util.continuations._
 
@@ -33,26 +34,14 @@ object Futures {
   /**
    * Java API, equivalent to Future.apply
    */
-  def future[T](body: Callable[T], timeout: Long): Future[T] =
-    Future(body.call, timeout)
-
-  /**
-   * Java API, equivalent to Future.apply
-   */
   def future[T](body: Callable[T], dispatcher: MessageDispatcher): Future[T] =
     Future(body.call)(dispatcher)
 
   /**
-   * Java API, equivalent to Future.apply
-   */
-  def future[T](body: Callable[T], timeout: Long, dispatcher: MessageDispatcher): Future[T] =
-    Future(body.call, timeout)(dispatcher)
-
-  /**
    * Returns a Future to the result of the first future in the list that is completed
    */
-  def firstCompletedOf[T](futures: Iterable[Future[T]], timeout: Long = Long.MaxValue): Future[T] = {
-    val futureResult = new DefaultCompletableFuture[T](timeout)
+  def firstCompletedOf[T](futures: Iterable[Future[T]]): Future[T] = {
+    val futureResult = new DefaultCompletableFuture[T]
 
     val completeFirst: Future[T] => Unit = _.value.foreach(futureResult complete _)
     for(f <- futures) f onComplete completeFirst
@@ -64,8 +53,8 @@ object Futures {
    * Java API.
    * Returns a Future to the result of the first future in the list that is completed
    */
-  def firstCompletedOf[T <: AnyRef](futures: java.lang.Iterable[Future[T]], timeout: Long): Future[T] =
-    firstCompletedOf(scala.collection.JavaConversions.iterableAsScalaIterable(futures),timeout)
+  def firstCompletedOf[T <: AnyRef](futures: java.lang.Iterable[Future[T]]): Future[T] =
+    firstCompletedOf(scala.collection.JavaConversions.iterableAsScalaIterable(futures))
 
   /**
    * A non-blocking fold over the specified futures.
@@ -77,11 +66,11 @@ object Futures {
    *   val result = Futures.fold(0)(futures)(_ + _).await.result
    * </pre>
    */
-  def fold[T,R](zero: R, timeout: Long = Actor.TIMEOUT)(futures: Iterable[Future[T]])(foldFun: (R, T) => R): Future[R] = {
+  def fold[T,R](zero: R)(futures: Iterable[Future[T]])(foldFun: (R, T) => R): Future[R] = {
     if(futures.isEmpty) {
       new AlreadyCompletedFuture[R](Right(zero))
     } else {
-      val result = new DefaultCompletableFuture[R](timeout)
+      val result = new DefaultCompletableFuture[R]
       val results = new ConcurrentLinkedQueue[T]()
       val allDone = futures.size
 
@@ -112,33 +101,23 @@ object Futures {
   }
 
   /**
-   * Java API
-   * A non-blocking fold over the specified futures.
-   * The fold is performed on the thread where the last future is completed,
-   * the result will be the first failure of any of the futures, or any failure in the actual fold,
-   * or the result of the fold.
-   */
-  def fold[T <: AnyRef, R <: AnyRef](zero: R, timeout: Long, futures: java.lang.Iterable[Future[T]], fun: akka.japi.Function2[R, T, R]): Future[R] =
-    fold(zero, timeout)(scala.collection.JavaConversions.iterableAsScalaIterable(futures))( fun.apply _ )
-
-  /**
    * Initiates a fold over the supplied futures where the fold-zero is the result value of the Future that's completed first
    * Example:
    * <pre>
    *   val result = Futures.reduce(futures)(_ + _).await.result
    * </pre>
    */
-  def reduce[T, R >: T](futures: Iterable[Future[T]], timeout: Long = Actor.TIMEOUT)(op: (R,T) => T): Future[R] = {
+  def reduce[T, R >: T](futures: Iterable[Future[T]])(op: (R,T) => T): Future[R] = {
     if (futures.isEmpty)
       new AlreadyCompletedFuture[R](Left(new UnsupportedOperationException("empty reduce left")))
     else {
-      val result = new DefaultCompletableFuture[R](timeout)
+      val result = new DefaultCompletableFuture[R]
       val seedFound = new AtomicBoolean(false)
       val seedFold: Future[T] => Unit = f => {
         if (seedFound.compareAndSet(false, true)) { //Only the first completed should trigger the fold
           f.value.get match {
             case r: Right[Throwable, T] =>
-              result.completeWith(fold(r.b, timeout)(futures.filterNot(_ eq f))(op))
+              result.completeWith(fold(r.b)(futures.filterNot(_ eq f))(op))
             case l: Left[Throwable, T] =>
               result.completeWithException(l.a)
           }
@@ -151,17 +130,10 @@ object Futures {
 
   /**
    * Java API.
-   * Initiates a fold over the supplied futures where the fold-zero is the result value of the Future that's completed first
-   */
-  def reduce[T <: AnyRef, R >: T](futures: java.lang.Iterable[Future[T]], timeout: Long, fun: akka.japi.Function2[R, T, T]): Future[R] =
-    reduce(scala.collection.JavaConversions.iterableAsScalaIterable(futures), timeout)(fun.apply _)
-
-  /**
-   * Java API.
    * Simple version of Futures.traverse. Transforms a java.lang.Iterable[Future[A]] into a Future[java.util.LinkedList[A]].
    * Useful for reducing many Futures into a single Future.
    */
-  def sequence[A](in: JIterable[Future[A]], timeout: Long): Future[JLinkedList[A]] =
+  def sequence[A](in: JIterable[Future[A]]): Future[JLinkedList[A]] =
     scala.collection.JavaConversions.iterableAsScalaIterable(in).foldLeft(Future(new JLinkedList[A]()))((fr, fa) =>
       for (r <- fr; a <- fa) yield {
         r add a
@@ -170,18 +142,11 @@ object Futures {
 
   /**
    * Java API.
-   * Simple version of Futures.traverse. Transforms a java.lang.Iterable[Future[A]] into a Future[java.util.LinkedList[A]].
-   * Useful for reducing many Futures into a single Future.
-   */
-  def sequence[A](in: JIterable[Future[A]]): Future[JLinkedList[A]] = sequence(in, Actor.TIMEOUT)
-
-  /**
-   * Java API.
    * Transforms a java.lang.Iterable[A] into a Future[java.util.LinkedList[B]] using the provided Function A => Future[B].
    * This is useful for performing a parallel map. For example, to apply a function to all items of a list
    * in parallel.
    */
-  def traverse[A, B](in: JIterable[A], timeout: Long, fn: JFunc[A,Future[B]]): Future[JLinkedList[B]] =
+  def traverse[A, B](in: JIterable[A], fn: JFunc[A,Future[B]]): Future[JLinkedList[B]] =
     scala.collection.JavaConversions.iterableAsScalaIterable(in).foldLeft(Future(new JLinkedList[B]())){(fr, a) =>
       val fb = fn(a)
       for (r <- fr; b <- fb) yield {
@@ -189,14 +154,6 @@ object Futures {
         r
       }
     }
-
-  /**
-   * Java API.
-   * Transforms a java.lang.Iterable[A] into a Future[java.util.LinkedList[B]] using the provided Function A => Future[B].
-   * This is useful for performing a parallel map. For example, to apply a function to all items of a list
-   * in parallel.
-   */
-  def traverse[A, B](in: JIterable[A], fn: JFunc[A,Future[B]]): Future[JLinkedList[B]] = traverse(in, Actor.TIMEOUT, fn)
 
   // =====================================
   // Deprecations
@@ -206,27 +163,27 @@ object Futures {
    * (Blocking!)
    */
   @deprecated("Will be removed after 1.1, if you must block, use: futures.foreach(_.await)")
-  def awaitAll(futures: List[Future[_]]): Unit = futures.foreach(_.await)
+  def awaitAll(futures: List[Future[_]])(implicit timeout: Timeout): Unit = futures.foreach(_.await)
 
   /**
    *  Returns the First Future that is completed (blocking!)
    */
   @deprecated("Will be removed after 1.1, if you must block, use: firstCompletedOf(futures).await")
-  def awaitOne(futures: List[Future[_]], timeout: Long = Long.MaxValue): Future[_] = firstCompletedOf[Any](futures, timeout).await
+  def awaitOne(futures: List[Future[_]])(implicit timeout: Timeout): Future[_] = firstCompletedOf[Any](futures).await
 
 
   /**
    * Applies the supplied function to the specified collection of Futures after awaiting each future to be completed
    */
   @deprecated("Will be removed after 1.1, if you must block, use: futures map { f => fun(f.await) }")
-  def awaitMap[A,B](in: Traversable[Future[A]])(fun: (Future[A]) => B): Traversable[B] =
+  def awaitMap[A,B](in: Traversable[Future[A]])(fun: (Future[A]) => B)(implicit timeout: Timeout): Traversable[B] =
     in map { f => fun(f.await) }
 
   /**
    * Returns Future.resultOrException of the first completed of the 2 Futures provided (blocking!)
    */
   @deprecated("Will be removed after 1.1, if you must block, use: firstCompletedOf(List(f1,f2)).await.resultOrException")
-  def awaitEither[T](f1: Future[T], f2: Future[T]): Option[T] = firstCompletedOf[T](List(f1,f2)).await.resultOrException
+  def awaitEither[T](f1: Future[T], f2: Future[T])(implicit timeout: Timeout): Option[T] = firstCompletedOf[T](List(f1,f2)).await.resultOrException
 }
 
 object Future {
@@ -234,8 +191,8 @@ object Future {
    * This method constructs and returns a Future that will eventually hold the result of the execution of the supplied body
    * The execution is performed by the specified Dispatcher.
    */
-  def apply[T](body: => T, timeout: Long = Actor.TIMEOUT)(implicit dispatcher: MessageDispatcher): Future[T] = {
-    val f = new DefaultCompletableFuture[T](timeout)
+  def apply[T](body: => T)(implicit dispatcher: MessageDispatcher): Future[T] = {
+    val f = new DefaultCompletableFuture[T]
     dispatcher.dispatchFuture(FutureInvocation(f.asInstanceOf[CompletableFuture[Any]], () => body))
     f
   }
@@ -247,8 +204,8 @@ object Future {
    * Simple version of Futures.traverse. Transforms a Traversable[Future[A]] into a Future[Traversable[A]].
    * Useful for reducing many Futures into a single Future.
    */
-  def sequence[A, M[_] <: Traversable[_]](in: M[Future[A]], timeout: Long = Actor.TIMEOUT)(implicit cbf: CanBuildFrom[M[Future[A]], A, M[A]]): Future[M[A]] =
-    in.foldLeft(new DefaultCompletableFuture[Builder[A, M[A]]](timeout).completeWithResult(cbf(in)): Future[Builder[A, M[A]]])((fr, fa) => for (r <- fr; a <- fa.asInstanceOf[Future[A]]) yield (r += a)).map(_.result)
+  def sequence[A, M[_] <: Traversable[_]](in: M[Future[A]])(implicit cbf: CanBuildFrom[M[Future[A]], A, M[A]]): Future[M[A]] =
+    in.foldLeft(new DefaultCompletableFuture[Builder[A, M[A]]].completeWithResult(cbf(in)): Future[Builder[A, M[A]]])((fr, fa) => for (r <- fr; a <- fa.asInstanceOf[Future[A]]) yield (r += a)).map(_.result)
 
   /**
    * Transforms a Traversable[A] into a Future[Traversable[B]] using the provided Function A => Future[B].
@@ -258,8 +215,8 @@ object Future {
    * val myFutureList = Futures.traverse(myList)(x => Future(myFunc(x)))
    * </pre>
    */
-  def traverse[A, B, M[_] <: Traversable[_]](in: M[A], timeout: Long = Actor.TIMEOUT)(fn: A => Future[B])(implicit cbf: CanBuildFrom[M[A], B, M[B]]): Future[M[B]] =
-    in.foldLeft(new DefaultCompletableFuture[Builder[B, M[B]]](timeout).completeWithResult(cbf(in)): Future[Builder[B, M[B]]]) { (fr, a) =>
+  def traverse[A, B, M[_] <: Traversable[_]](in: M[A])(fn: A => Future[B])(implicit cbf: CanBuildFrom[M[A], B, M[B]]): Future[M[B]] =
+    in.foldLeft(new DefaultCompletableFuture[Builder[B, M[B]]].completeWithResult(cbf(in)): Future[Builder[B, M[B]]]) { (fr, a) =>
       val fb = fn(a.asInstanceOf[A])
       for (r <- fr; b <-fb) yield (r += b)
     }.map(_.result)
@@ -280,8 +237,8 @@ object Future {
    *
    * The Delimited Continuations compiler plugin must be enabled in order to use this method.
    */
-  def flow[A](body: => A @cps[Future[A]], timeout: Long = Actor.TIMEOUT): Future[A] =
-    reset(new DefaultCompletableFuture[A](timeout).completeWithResult(body))
+  def flow[A](body: => A @cps[Future[A]]): Future[A] =
+    reset(new DefaultCompletableFuture[A].completeWithResult(body))
 }
 
 sealed trait Future[+T] {
@@ -306,39 +263,19 @@ sealed trait Future[+T] {
    *
    * throws FutureTimeoutException if this Future times out when waiting for completion
    */
-  def get: T = this.await.resultOrException.get
+  def get(implicit timeout: Timeout): T = this.await.resultOrException.getOrElse(throw new FutureTimeoutException("Futures timed out"))
 
   /**
    * Blocks the current thread until the Future has been completed or the
    * timeout has expired. In the case of the timeout expiring a
    * FutureTimeoutException will be thrown.
    */
-  def await : Future[T]
-
-  /**
-   * Blocks the current thread until the Future has been completed. Use
-   * caution with this method as it ignores the timeout and will block
-   * indefinitely if the Future is never completed.
-   */
-  def awaitBlocking : Future[T]
+  def await(implicit timeout: Timeout) : Future[T]
 
   /**
    * Tests whether this Future has been completed.
    */
   final def isCompleted: Boolean = value.isDefined
-
-  /**
-   * Tests whether this Future's timeout has expired.
-   *
-   * Note that an expired Future may still contain a value, or it may be
-   * completed with a value.
-   */
-  def isExpired: Boolean
-
-  /**
-   * This Future's timeout in nanoseconds.
-   */
-  def timeoutInNanos: Long
 
   /**
    * The contained value of this Future. Before this Future is completed
@@ -356,24 +293,6 @@ sealed trait Future[+T] {
     if (v.isDefined) v.get.right.toOption
     else None
   }
-
-  /**
-   * Waits for the completion of this Future, then returns the completed value.
-   * If the Future's timeout expires while waiting a FutureTimeoutException
-   * will be thrown.
-   *
-   * Equivalent to calling future.await.value.
-   */
-  def awaitValue: Option[Either[Throwable, T]]
-
-  /**
-   * Returns the result of the Future if one is available within the specified
-   * time, if the time left on the future is less than the specified time, the
-   * time left on the future will be used instead of the specified time.
-   * returns None if no result, Some(Right(t)) if a result, or
-   * Some(Left(error)) if there was an exception
-   */
-  def valueWithin(time: Long, unit: TimeUnit): Option[Either[Throwable, T]]
 
   /**
    * Returns the contained exception of this Future if it exists.
@@ -424,7 +343,7 @@ sealed trait Future[+T] {
    * </pre>
    */
   final def collect[A](pf: PartialFunction[Any, A]): Future[A] = {
-    val fa = new DefaultCompletableFuture[A](timeoutInNanos, NANOS)
+    val fa = new DefaultCompletableFuture[A]
     onComplete { ft =>
       val v = ft.value.get
       fa complete {
@@ -457,7 +376,7 @@ sealed trait Future[+T] {
    * </pre>
    */
   final def failure[A >: T](pf: PartialFunction[Throwable, A]): Future[A] = {
-    val fa = new DefaultCompletableFuture[A](timeoutInNanos, NANOS)
+    val fa = new DefaultCompletableFuture[A]
     onComplete { ft =>
       val opte = ft.exception
       fa complete {
@@ -489,7 +408,7 @@ sealed trait Future[+T] {
    * </pre>
    */
   final def map[A](f: T => A): Future[A] = {
-    val fa = new DefaultCompletableFuture[A](timeoutInNanos, NANOS)
+    val fa = new DefaultCompletableFuture[A]
     onComplete { ft =>
       val optv = ft.value
       if (optv.isDefined) {
@@ -525,7 +444,7 @@ sealed trait Future[+T] {
    * </pre>
    */
   final def flatMap[A](f: T => Future[A]): Future[A] = {
-    val fa = new DefaultCompletableFuture[A](timeoutInNanos, NANOS)
+    val fa = new DefaultCompletableFuture[A]
     onComplete { ft =>
       val optv = ft.value
       if (optv.isDefined) {
@@ -553,7 +472,7 @@ sealed trait Future[+T] {
   }
 
   final def filter(p: Any => Boolean): Future[Any] = {
-    val f = new DefaultCompletableFuture[T](timeoutInNanos, NANOS)
+    val f = new DefaultCompletableFuture[T]
     onComplete { ft =>
       val optv = ft.value
       if (optv.isDefined) {
@@ -639,7 +558,7 @@ trait CompletableFuture[T] extends Future[T] {
   final def << (value: T): Future[T] = complete(Right(value))
 
   final def << (other: Future[T]): Future[T] @cps[Future[Any]] = shift { cont: (Future[T] => Future[Any]) =>
-    val fr = new DefaultCompletableFuture[Any](Actor.TIMEOUT)
+    val fr = new DefaultCompletableFuture[Any]
     this completeWith other onComplete { f =>
       try {
         fr completeWith cont(f)
@@ -657,21 +576,15 @@ trait CompletableFuture[T] extends Future[T] {
 /**
  * The default concrete Future implementation.
  */
-class DefaultCompletableFuture[T](timeout: Long, timeunit: TimeUnit) extends CompletableFuture[T] {
+class DefaultCompletableFuture[T]() extends CompletableFuture[T] {
 
-  def this() = this(0, MILLIS)
-
-  def this(timeout: Long) = this(timeout, MILLIS)
-
-  val timeoutInNanos = timeunit.toNanos(timeout)
-  private val _startTimeInNanos = currentTimeInNanos
   private val _lock = new ReentrantLock
   private val _signal = _lock.newCondition
   private var _value: Option[Either[Throwable, T]] = None
   private var _listeners: List[Future[T] => Unit] = Nil
 
   @tailrec
-  private def awaitUnsafe(wait: Long): Boolean = {
+  private def awaitUnsafe(wait: Long) {
     if (_value.isEmpty && wait > 0) {
       val start = currentTimeInNanos
       val remaining = try {
@@ -681,50 +594,18 @@ class DefaultCompletableFuture[T](timeout: Long, timeunit: TimeUnit) extends Com
           wait - (currentTimeInNanos - start)
       }
       awaitUnsafe(remaining)
-    } else {
-      _value.isDefined
     }
   }
 
-  def awaitValue: Option[Either[Throwable, T]] = {
-    _lock.lock
-    try {
-      awaitUnsafe(timeoutInNanos - (currentTimeInNanos - _startTimeInNanos))
-      _value
-    } finally {
-      _lock.unlock
-    }
-  }
+  private def currentTimeInNanos = MILLIS.toNanos(System.currentTimeMillis)
 
-  def valueWithin(time: Long, unit: TimeUnit): Option[Either[Throwable, T]] = {
+  def await(implicit timeout: Timeout) = {
     _lock.lock
-    try {
-      awaitUnsafe(unit.toNanos(time).min(timeoutInNanos - (currentTimeInNanos - _startTimeInNanos)))
-      _value
-    } finally {
-      _lock.unlock
-    }
+    val length = timeout.duration.length
+    val unit = timeout.duration.unit
+    try { awaitUnsafe(unit.toNanos(length)) } finally { _lock.unlock }
+    this
   }
-
-  def await = {
-    _lock.lock
-    if (try { awaitUnsafe(timeoutInNanos - (currentTimeInNanos - _startTimeInNanos)) } finally { _lock.unlock }) this
-    else throw new FutureTimeoutException("Futures timed out after [" + NANOS.toMillis(timeoutInNanos) + "] milliseconds")
-  }
-
-  def awaitBlocking = {
-    _lock.lock
-    try {
-      while (_value.isEmpty) {
-        _signal.await
-      }
-      this
-    } finally {
-      _lock.unlock
-    }
-  }
-
-  def isExpired: Boolean = timeoutInNanos - (currentTimeInNanos - _startTimeInNanos) <= 0
 
   def value: Option[Either[Throwable, T]] = {
     _lock.lock
@@ -778,8 +659,6 @@ class DefaultCompletableFuture[T](timeout: Long, timeunit: TimeUnit) extends Com
       case e => EventHandler notify EventHandler.Error(e, this)
     }
   }
-
-  private def currentTimeInNanos: Long = MILLIS.toNanos(System.currentTimeMillis)
 }
 
 /**
@@ -791,10 +670,5 @@ sealed class AlreadyCompletedFuture[T](suppliedValue: Either[Throwable, T]) exte
 
   def complete(value: Either[Throwable, T]): CompletableFuture[T] = this
   def onComplete(func: Future[T] => Unit): Future[T] = { func(this); this }
-  def awaitValue: Option[Either[Throwable, T]] = value
-  def valueWithin(time: Long, unit: TimeUnit): Option[Either[Throwable, T]] = value
-  def await : Future[T] = this
-  def awaitBlocking : Future[T] = this
-  def isExpired: Boolean = true
-  def timeoutInNanos: Long = 0
+  def await(implicit timeout: Timeout) : Future[T] = this
 }

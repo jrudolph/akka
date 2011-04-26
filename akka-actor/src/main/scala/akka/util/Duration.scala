@@ -8,6 +8,15 @@ import java.util.concurrent.TimeUnit
 import TimeUnit._
 import java.lang.{Long => JLong, Double => JDouble}
 
+object Timeout extends DefaultTimeout {
+  implicit def duration2Timeout(in: Duration): Timeout = Timeout(in)
+}
+trait DefaultTimeout {
+  implicit val defaultTimeout: Timeout = Timeout(Duration(5, SECONDS))
+}
+
+case class Timeout(duration: Duration)
+
 object Duration {
   def apply(length: Long, unit: TimeUnit) : Duration = new FiniteDuration(length, unit)
   def apply(length: Double, unit: TimeUnit) : Duration = fromNanos(unit.toNanos(1) * length)
@@ -32,6 +41,10 @@ object Duration {
   }
 
   def fromNanos(nanos : Double) : Duration = fromNanos((nanos + 0.5).asInstanceOf[Long])
+
+  def fromNow(duration: Duration): Duration = new DurationFromNow(duration)
+  def fromNow(length: Long, unit: TimeUnit): Duration = fromNow(Duration(length, unit))
+  def fromNow(length: Long, unit: String): Duration = fromNow(Duration(length, timeUnit(unit)))
 
   /**
    * Construct a Duration by parsing a String. In case of a format error, a
@@ -315,6 +328,35 @@ class FiniteDuration(val length: Long, val unit: TimeUnit) extends Duration {
     toNanos == other.asInstanceOf[FiniteDuration].toNanos
 
   override def hashCode = toNanos.asInstanceOf[Int]
+}
+
+class DurationFromNow(duration: Duration) extends Duration {
+  val target = System.currentTimeMillis + duration.toMillis
+  def length = target - System.currentTimeMillis
+  val unit = MILLISECONDS
+
+  def toNanos = unit.toNanos(length)
+  def toMicros = unit.toMicros(length)
+  def toMillis = unit.toMillis(length)
+  def toSeconds = unit.toSeconds(length)
+  def toMinutes = unit.toMinutes(length)
+  def toHours = unit.toHours(length)
+  def toDays = unit.toDays(length)
+  def toUnit(u : TimeUnit) = long2double(toNanos) / NANOSECONDS.convert(1, u)
+
+  override def toString = Duration(length, unit).toString
+
+  def printHMS : String = Duration(length, unit).toString
+  def <(other : Duration) : Boolean = Duration(length, unit) < other
+  def <=(other : Duration) : Boolean = Duration(length, unit) <= other
+  def >(other : Duration) : Boolean = Duration(length, unit) > other
+  def >=(other : Duration) : Boolean = Duration(length, unit) >= other
+  def +(other : Duration) : Duration = new DurationFromNow(Duration(length, unit) + other)
+  def -(other : Duration) : Duration = new DurationFromNow(Duration(length, unit) - other)
+  def *(factor : Double) : Duration = new DurationFromNow(Duration(length, unit) * factor)
+  def /(factor : Double) : Duration = new DurationFromNow(Duration(length, unit) / factor)
+  def unary_- : Duration = new DurationFromNow(-Duration(length, unit))
+  def finite_? : Boolean = false
 }
 
 class DurationInt(n: Int) {

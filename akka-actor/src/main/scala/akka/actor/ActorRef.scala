@@ -840,7 +840,7 @@ class LocalActorRef private[akka] (
       if (future.isDefined) future.get
       else throw new IllegalActorStateException("Expected a future from remote call to actor " + toString)
     } else {
-      val future = if (senderFuture.isDefined) senderFuture else Some(new DefaultCompletableFuture[T](timeout))
+      val future = if (senderFuture.isDefined) senderFuture else Some(new DefaultCompletableFuture[T])
       dispatcher dispatchMessage new MessageInvocation(
         this, message, senderOption, future.asInstanceOf[Some[CompletableFuture[Any]]])
       future.get

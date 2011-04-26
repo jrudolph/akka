@@ -261,7 +261,7 @@ class FutureSpec extends JUnitSuite {
       }).start()
     }
     def futures = actors.zipWithIndex map { case (actor: ActorRef, idx: Int) => actor.!!![Int]((idx, idx * 200 )) }
-    assert(Futures.fold(0)(futures)(_ + _).awaitBlocking.result.get === 45)
+    assert(Futures.fold(0)(futures)(_ + _).get === 45)
   }
 
   @Test def shouldFoldResultsByComposing {
@@ -271,7 +271,7 @@ class FutureSpec extends JUnitSuite {
       }).start()
     }
     def futures = actors.zipWithIndex map { case (actor: ActorRef, idx: Int) => actor.!!![Int]((idx, idx * 200 )) }
-    assert(futures.foldLeft(Future(0))((fr, fa) => for (r <- fr; a <- fa) yield (r + a)).awaitBlocking.result.get === 45)
+    assert(futures.foldLeft(Future(0))((fr, fa) => for (r <- fr; a <- fa) yield (r + a)).get === 45)
   }
 
   @Test def shouldFoldResultsWithException {
@@ -286,11 +286,11 @@ class FutureSpec extends JUnitSuite {
       }).start()
     }
     def futures = actors.zipWithIndex map { case (actor: ActorRef, idx: Int) => actor.!!![Int]((idx, idx * 100 )) }
-    assert(Futures.fold(0)(futures)(_ + _).awaitBlocking.exception.get.getMessage === "shouldFoldResultsWithException: expected")
+    assert(Futures.fold(0)(futures)(_ + _).await.exception.get.getMessage === "shouldFoldResultsWithException: expected")
   }
 
   @Test def shouldFoldReturnZeroOnEmptyInput {
-    assert(Futures.fold(0)(List[Future[Int]]())(_ + _).awaitBlocking.result.get === 0)
+    assert(Futures.fold(0)(List[Future[Int]]())(_ + _).get === 0)
   }
 
   @Test def shouldReduceResults {
@@ -300,7 +300,7 @@ class FutureSpec extends JUnitSuite {
       }).start()
     }
     def futures = actors.zipWithIndex map { case (actor: ActorRef, idx: Int) => actor.!!![Int]((idx, idx * 200 )) }
-    assert(Futures.reduce(futures)(_ + _).awaitBlocking.result.get === 45)
+    assert(Futures.reduce(futures)(_ + _).get === 45)
   }
 
   @Test def shouldReduceResultsWithException {
@@ -315,31 +315,11 @@ class FutureSpec extends JUnitSuite {
       }).start()
     }
     def futures = actors.zipWithIndex map { case (actor: ActorRef, idx: Int) => actor.!!![Int]((idx, idx * 100 )) }
-    assert(Futures.reduce(futures)(_ + _).awaitBlocking.exception.get.getMessage === "shouldFoldResultsWithException: expected")
+    assert(Futures.reduce(futures)(_ + _).await.exception.get.getMessage === "shouldFoldResultsWithException: expected")
   }
 
   @Test(expected = classOf[UnsupportedOperationException]) def shouldReduceThrowIAEOnEmptyInput {
     Futures.reduce(List[Future[Int]]())(_ + _).await.resultOrException
-  }
-
-  @Test def resultWithinShouldNotThrowExceptions {
-    val latch = new StandardLatch
-
-    val actors = (1 to 10).toList map { _ =>
-      actorOf(new Actor {
-        def receive = { case (add: Int, wait: Boolean, latch: StandardLatch) => if (wait) latch.await; self reply_? add }
-      }).start()
-    }
-
-    def futures = actors.zipWithIndex map { case (actor: ActorRef, idx: Int) => actor.!!![Int]((idx, idx >= 5, latch)) }
-    val result = for(f <- futures) yield f.valueWithin(2, TimeUnit.SECONDS)
-    latch.open
-    val done = result collect { case Some(Right(x)) => x }
-    val undone = result collect { case None => None }
-    val errors = result collect { case Some(Left(t)) => t }
-    assert(done.size === 5)
-    assert(undone.size === 5)
-    assert(errors.size === 0)
   }
 
   @Test def receiveShouldExecuteOnComplete {
@@ -402,9 +382,9 @@ class FutureSpec extends JUnitSuite {
     latch.open
     assert(f2.get === 10)
 
-    val f3 = Future({ Thread.sleep(100); 5}, 10)
+    val f3 = Future({ Thread.sleep(100); 5})
     intercept[FutureTimeoutException] {
-      f3.get
+      f3.get(akka.util.Duration("10ms"))
     }
   }
 
@@ -463,7 +443,7 @@ class FutureSpec extends JUnitSuite {
   @Test def futureCompletingWithContinuations {
     import Future.flow
 
-    val x, y, z = new DefaultCompletableFuture[Int](Actor.TIMEOUT)
+    val x, y, z = new DefaultCompletableFuture[Int]
     val ly, lz = new StandardLatch
 
     val result = flow {
@@ -485,7 +465,7 @@ class FutureSpec extends JUnitSuite {
     assert(lz.isOpen)
     assert(result.get === 10)
 
-    val a, b, c = new DefaultCompletableFuture[Int](Actor.TIMEOUT)
+    val a, b, c = new DefaultCompletableFuture[Int]
 
     val result2 = flow {
       val n = (a << c).result.get + 10
@@ -503,7 +483,7 @@ class FutureSpec extends JUnitSuite {
   @Test def futureDataFlowShouldEmulateBlocking1 {
     import Future.flow
 
-    val one, two = new DefaultCompletableFuture[Int](1000 * 60)
+    val one, two = new DefaultCompletableFuture[Int]
     val simpleResult = flow {
       one() + two()
     }
@@ -524,7 +504,8 @@ class FutureSpec extends JUnitSuite {
 
   @Test def futureDataFlowShouldEmulateBlocking2 {
     import Future.flow
-    val x1, x2, y1, y2 = new DefaultCompletableFuture[Int](1000 * 60)
+
+    val x1, x2, y1, y2 = new DefaultCompletableFuture[Int]
     val lx, ly, lz = new StandardLatch
     val result = flow {
       lx.open()
@@ -578,7 +559,7 @@ class FutureSpec extends JUnitSuite {
   @Test def futureCompletingWithContinuationsFailure {
     import Future.flow
 
-    val x, y, z = new DefaultCompletableFuture[Int](Actor.TIMEOUT)
+    val x, y, z = new DefaultCompletableFuture[Int]
     val ly, lz = new StandardLatch
 
     val result = flow {
