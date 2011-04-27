@@ -264,6 +264,7 @@ sealed trait Future[+T] {
    * throws FutureTimeoutException if this Future times out when waiting for completion
    */
   def get(implicit timeout: Timeout): T = this.await.resultOrException.getOrElse(throw new FutureTimeoutException("Futures timed out"))
+  def get(): T = get(implicitly)
 
   /**
    * Blocks the current thread until the Future has been completed or the
@@ -271,6 +272,7 @@ sealed trait Future[+T] {
    * FutureTimeoutException will be thrown.
    */
   def await(implicit timeout: Timeout) : Future[T]
+  def await(): Future[T] = await(implicitly)
 
   /**
    * Tests whether this Future has been completed.

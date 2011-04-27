@@ -16,8 +16,6 @@ import akka.util.DurationInt;
 
 public class JavaFutureTests {
 
-    Timeout to = new Timeout(new DurationInt(5).seconds());
-
     @Test public void mustBeAbleToMapAFuture() {
         Future<String> f1 = future(new Callable<String>() {
                 public String call() {
@@ -31,7 +29,7 @@ public class JavaFutureTests {
                 }
             });
 
-        assertEquals("Hello World", f2.get(to));
+        assertEquals("Hello World", f2.get());
     }
 
     // TODO: Improve this test, perhaps with an Actor
@@ -50,7 +48,7 @@ public class JavaFutureTests {
 
         Future<LinkedList<String>> futureList = sequence(listFutures);
 
-        assertEquals(futureList.get(to), listExpected);
+        assertEquals(futureList.get(), listExpected);
     }
 
 }

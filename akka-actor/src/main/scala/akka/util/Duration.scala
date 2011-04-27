@@ -18,7 +18,9 @@ trait DefaultTimeout {
   implicit val defaultTimeout: Timeout = Timeout(5, SECONDS)
 }
 
-case class Timeout(duration: Duration)
+case class Timeout(duration: Duration) {
+  def fromNow = Timeout(new DurationFromNow(duration))
+}
 
 object Duration {
   def apply(length: Long, unit: TimeUnit) : Duration = new FiniteDuration(length, unit)

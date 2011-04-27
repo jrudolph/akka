@@ -102,15 +102,15 @@ class TypedActorGuiceConfiguratorSpec extends
       messageLog should equal("foo return_foo before_bar ")
     }
 
-    it("should throw FutureTimeoutException on time-out") {
+    it("should throw ActorTimeoutException on time-out") {
       messageLog = ""
       val foo = conf.getInstance(classOf[Foo])
       try {
         foo.longRunning
         fail("exception should have been thrown")
       } catch {
-        case e: FutureTimeoutException =>
-          classOf[FutureTimeoutException] should equal(e.getClass)
+        case e: akka.actor.ActorTimeoutException =>
+          classOf[akka.actor.ActorTimeoutException] should equal(e.getClass)
       }
     }
 

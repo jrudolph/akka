@@ -130,8 +130,8 @@ object Pi extends App {
     val start = now
 
     //send calculate message
-    master.!!![Double](Calculate, timeout = 60000).
-      await.resultOrException match {//wait for the result, with a 60 seconds timeout
+    master.!!![Double](Calculate).
+      await(60000).resultOrException match {//wait for the result, with a 60 seconds timeout
         case Some(pi) =>
           EventHandler.info(this, "\n\tPi estimate: \t\t%s\n\tCalculation time: \t%s millis".format(pi, (now - start)))
         case None =>

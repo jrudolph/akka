@@ -169,7 +169,7 @@ abstract class RemoteClient private[akka] (
              remoteAddress.getAddress.getHostAddress + "::" +
              remoteAddress.getPort
 
-  protected val futures         = new ConcurrentHashMap[Uuid, CompletableFuture[_]]
+  protected val futures         = new ConcurrentHashMap[Uuid, (CompletableFuture[_], akka.util.Timeout)]
   protected val supervisors     = new ConcurrentHashMap[Uuid, ActorRef]
   protected val pendingRequests = {
     if (transactionLogCapacity < 0) new ConcurrentLinkedQueue[(Boolean, Uuid, RemoteMessageProtocol)]
@@ -259,9 +259,9 @@ abstract class RemoteClient private[akka] (
         None
       } else {
         val futureResult = if (senderFuture.isDefined) senderFuture.get
-                           else new DefaultCompletableFuture[T](request.getActorInfo.getTimeout)
+                           else new DefaultCompletableFuture[T]
         val futureUuid = uuidFrom(request.getUuid.getHigh, request.getUuid.getLow)
-        futures.put(futureUuid, futureResult) // Add future prematurely, remove it if write fails
+        futures.put(futureUuid, (futureResult, implicitly[akka.util.Timeout].fromNow)) // Add future prematurely, remove it if write fails
 
         def handleRequestReplyError(future: ChannelFuture) = {
           notifyListeners(RemoteClientWriteFailed(request, future.getCause, module, remoteAddress))
@@ -269,7 +269,7 @@ abstract class RemoteClient private[akka] (
             if (!pendingRequests.offer((false, futureUuid, request))) // Add the request to the tx log after a failing send
               throw new RemoteClientMessageBufferException("Buffer limit [" + transactionLogCapacity + "] reached")
           } else {
-            val f = futures.remove(futureUuid)                // Clean up future
+            val (f, _) = futures.remove(futureUuid)                // Clean up future
             if (f ne null) f.completeWithException(future.getCause)
           }
         }
@@ -311,7 +311,7 @@ abstract class RemoteClient private[akka] (
         future.awaitUninterruptibly()
         if (future.isCancelled) futures.remove(futureUuid) // Clean up future
         else if (!future.isSuccess) {
-          val f = futures.remove(futureUuid) // Clean up future
+          val (f, _) = futures.remove(futureUuid) // Clean up future
           if (f ne null) f.completeWithException(future.getCause)
           notifyListeners(RemoteClientWriteFailed(message, future.getCause, module, remoteAddress))
         }
@@ -377,7 +377,7 @@ class ActiveRemoteClient private[akka] (
               val i = futures.entrySet.iterator
               while(i.hasNext) {
                 val e = i.next
-                if (e.getValue.isExpired)
+                if (e.getValue._2.duration.length <= 0)
                   futures.remove(e.getKey)
               }
             }
@@ -432,7 +432,7 @@ class ActiveRemoteClient private[akka] (
  */
 class ActiveRemoteClientPipelineFactory(
   name: String,
-  futures: ConcurrentMap[Uuid, CompletableFuture[_]],
+  futures: ConcurrentMap[Uuid, (CompletableFuture[_], akka.util.Timeout)],
   supervisors: ConcurrentMap[Uuid, ActorRef],
   bootstrap: ClientBootstrap,
   remoteAddress: InetSocketAddress,
@@ -462,7 +462,7 @@ class ActiveRemoteClientPipelineFactory(
 @ChannelHandler.Sharable
 class ActiveRemoteClientHandler(
   val name: String,
-  val futures: ConcurrentMap[Uuid, CompletableFuture[_]],
+  val futures: ConcurrentMap[Uuid, (CompletableFuture[_], akka.util.Timeout)],
   val supervisors: ConcurrentMap[Uuid, ActorRef],
   val bootstrap: ClientBootstrap,
   val remoteAddress: InetSocketAddress,
@@ -481,7 +481,7 @@ class ActiveRemoteClientHandler(
         case arp: AkkaRemoteProtocol if arp.hasMessage =>
           val reply = arp.getMessage
           val replyUuid = uuidFrom(reply.getActorInfo.getUuid.getHigh, reply.getActorInfo.getUuid.getLow)
-          val future = futures.remove(replyUuid).asInstanceOf[CompletableFuture[Any]]
+          val future = futures.remove(replyUuid)._1.asInstanceOf[CompletableFuture[Any]]
 
           if (reply.hasMessage) {
             if (future eq null) throw new IllegalActorStateException("Future mapped to UUID " + replyUuid + " does not exist")
@@ -983,7 +983,7 @@ class RemoteServerHandler(
           message,
           request.getActorInfo.getTimeout,
           None,
-          Some(new DefaultCompletableFuture[Any](request.getActorInfo.getTimeout).
+          Some(new DefaultCompletableFuture[Any].
             onComplete(_.value.get match {
               case l: Left[Throwable, Any] => write(channel, createErrorReplyMessage(l.a, request, AkkaActorType.ScalaActor))
               case r: Right[Throwable, Any] =>

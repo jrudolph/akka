@@ -954,7 +954,7 @@ private[akka] abstract class ActorAspect {
       actorRef.!(joinPoint)(senderActorRef)
       null.asInstanceOf[AnyRef]
     } else if (TypedActor.returnsFuture_?(methodRtti)) {
-      actorRef.!!!(joinPoint, timeout)(senderActorRef)
+      actorRef.!!!(joinPoint)(senderActorRef)
     } else if (TypedActor.returnsOption_?(methodRtti)) {
         import akka.japi.{Option => JOption}
       (actorRef.!!(joinPoint, timeout)(senderActorRef)).as[JOption[AnyRef]] match {

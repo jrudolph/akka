@@ -266,8 +266,8 @@ class RoutingSpec extends WordSpec with MustMatchers {
         }).start()
 
       try {
-        (for (count <- 1 to 500) yield pool.!!![String]("Test", 20000)) foreach {
-          _.await.resultOrException.get must be ("Response")
+        (for (count <- 1 to 500) yield pool.!!![String]("Test")) foreach {
+          _.await(20000).resultOrException.get must be ("Response")
         }
       } finally {
         pool.stop()
