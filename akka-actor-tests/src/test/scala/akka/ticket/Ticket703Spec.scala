@@ -28,7 +28,7 @@ class Ticket703Spec extends WordSpec with MustMatchers {
                  }
                })
         }).start()
-        (actorPool.!!![String]("Ping", 7000)).await.result must be === Some("Response")
+        (actorPool !!! "Ping").await(7000).result must be === Some("Response")
     }
   }
 }

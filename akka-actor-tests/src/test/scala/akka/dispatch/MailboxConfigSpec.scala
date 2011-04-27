@@ -9,7 +9,6 @@ import akka.actor.Actor.{actorOf}
 import java.util.concurrent. {TimeUnit, CountDownLatch, BlockingQueue}
 import java.util.{Queue}
 import akka.util._
-import akka.util.Duration._
 
 
 @RunWith(classOf[JUnitRunner])
@@ -28,7 +27,7 @@ abstract class MailboxSpec extends
         val q = factory(config)
         ensureInitialMailboxState(config, q)
 
-        implicit val within = Duration(1,TimeUnit.SECONDS)
+        implicit val within = Timeout(1,TimeUnit.SECONDS)
 
         val f = spawn {
           q.dequeue
@@ -121,44 +120,44 @@ abstract class MailboxSpec extends
     }
 
     def testEnqueueDequeue(config: MailboxType) {
-      implicit val within = Duration(10,TimeUnit.SECONDS)
-        val q = factory(config)
-        ensureInitialMailboxState(config, q)
+      implicit val within = Timeout(10,TimeUnit.SECONDS)
+      val q = factory(config)
+      ensureInitialMailboxState(config, q)
 
-        def createProducer(fromNum: Int, toNum: Int): Future[Vector[MessageInvocation]] = spawn {
-          val messages = Vector() ++ (for(i <- fromNum to toNum) yield createMessageInvocation(i))
-          for(i <- messages) q.enqueue(i)
-          messages
-        }
+      def createProducer(fromNum: Int, toNum: Int): Future[Vector[MessageInvocation]] = spawn {
+        val messages = Vector() ++ (for(i <- fromNum to toNum) yield createMessageInvocation(i))
+        for(i <- messages) q.enqueue(i)
+        messages
+      }
 
-        val totalMessages = 10000
-        val step = 500
+      val totalMessages = 10000
+      val step = 500
 
-        val producers = for(i <- (1 to totalMessages by step).toList) yield createProducer(i,i+step-1)
+      val producers = for(i <- (1 to totalMessages by step).toList) yield createProducer(i,i+step-1)
 
-        def createConsumer: Future[Vector[MessageInvocation]] = spawn {
-          var r = Vector[MessageInvocation]()
-          while(producers.exists(_.isCompleted == false) || !q.isEmpty) {
-            q.dequeue match {
-              case null =>
-              case message => r = r :+ message
-            }
+      def createConsumer: Future[Vector[MessageInvocation]] = spawn {
+        var r = Vector[MessageInvocation]()
+        while(producers.exists(_.isCompleted == false) || !q.isEmpty) {
+          q.dequeue match {
+            case null =>
+            case message => r = r :+ message
           }
-          r
         }
+        r
+      }
 
-        val consumers = for(i <- (1 to 4).toList) yield createConsumer
+      val consumers = for(i <- (1 to 4).toList) yield createConsumer
 
-        val ps = producers.map(_.await.resultOrException.get)
-        val cs = consumers.map(_.await.resultOrException.get)
+      val ps = producers.map(_.await.resultOrException.get)
+      val cs = consumers.map(_.await.resultOrException.get)
 
-        ps.map(_.size).sum must be === totalMessages //Must have produced 1000 messages
-        cs.map(_.size).sum must be === totalMessages //Must have consumed all produced messages
-        //No message is allowed to be consumed by more than one consumer
-        cs.flatten.distinct.size must be === totalMessages
-        //All produced messages should have been consumed
-        (cs.flatten diff ps.flatten).size must be === 0
-        (ps.flatten diff cs.flatten).size must be === 0
+      ps.map(_.size).sum must be === totalMessages //Must have produced 1000 messages
+      cs.map(_.size).sum must be === totalMessages //Must have consumed all produced messages
+      //No message is allowed to be consumed by more than one consumer
+      cs.flatten.distinct.size must be === totalMessages
+      //All produced messages should have been consumed
+      (cs.flatten diff ps.flatten).size must be === 0
+      (ps.flatten diff cs.flatten).size must be === 0
     }
   }
 

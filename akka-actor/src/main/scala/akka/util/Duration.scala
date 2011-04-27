@@ -9,10 +9,13 @@ import TimeUnit._
 import java.lang.{Long => JLong, Double => JDouble}
 
 object Timeout extends DefaultTimeout {
+  def apply(length: Long, unit: TimeUnit): Timeout = Timeout(Duration(length, unit))
   implicit def duration2Timeout(in: Duration): Timeout = Timeout(in)
+  implicit def long2Timeout(millis: Long): Timeout = apply(millis, MILLISECONDS)
+  implicit def string2Timeout(in: String): Timeout = Timeout(Duration(in))
 }
 trait DefaultTimeout {
-  implicit val defaultTimeout: Timeout = Timeout(Duration(5, SECONDS))
+  implicit val defaultTimeout: Timeout = Timeout(5, SECONDS)
 }
 
 case class Timeout(duration: Duration)

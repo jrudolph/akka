@@ -384,7 +384,7 @@ class FutureSpec extends JUnitSuite {
 
     val f3 = Future({ Thread.sleep(100); 5})
     intercept[FutureTimeoutException] {
-      f3.get(akka.util.Duration("10ms"))
+      f3.get(10)
     }
   }
 
