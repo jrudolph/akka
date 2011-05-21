@@ -183,6 +183,8 @@ object EventHandler extends ListenerManagement {
     self.id = ID
     self.dispatcher = EventHandlerDispatcher
 
+    override val shutdownLevel = config.getInt("akka.event-handler.shutdownLevel", 1000000)
+
     def receive = {
       case event @ Error(cause, instance, message) =>
         println(error.format(
