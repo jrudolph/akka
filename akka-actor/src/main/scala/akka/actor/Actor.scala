@@ -424,6 +424,13 @@ trait Actor {
   protected def receive: Receive
 
   /**
+   * Shutdown level of this actor; override if this actor needs to be shutdown
+   * before/after other actors. The default level is 1, greater level means
+   * later shutdown.
+   */
+  def shutdownLevel: Int = 1
+
+  /**
    * User overridable callback.
    * <p/>
    * Is called when an Actor is started by invoking 'actor.start()'.

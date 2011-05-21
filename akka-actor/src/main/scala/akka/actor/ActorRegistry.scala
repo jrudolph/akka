@@ -9,10 +9,11 @@ import scala.reflect.Manifest
 
 import java.util.concurrent.{ConcurrentSkipListSet, ConcurrentHashMap}
 import java.util.{Set => JSet}
+import java.lang.{Integer => JInt}
 
 import annotation.tailrec
 import akka.util.ReflectiveAccess._
-import akka.util. {ReflectiveAccess, ReadWriteGuard, ListenerManagement}
+import akka.util. {ReflectiveAccess, ReadWriteGuard, ListenerManagement, ConcurrentMultiMap}
 
 /**
  * Base trait for ActorRegistry events, allows listen to when an actor is added and removed from the ActorRegistry.
@@ -41,6 +42,8 @@ final class ActorRegistry private[actor] () extends ListenerManagement {
   private val actorsByUUID    = new ConcurrentHashMap[Uuid, ActorRef]
   private val actorsById      = new Index[String,ActorRef]
   private val guard           = new ReadWriteGuard
+  private val actorsByLevel   = new ConcurrentMultiMap[JInt, ActorRef]
+  private val shutdownLevel   = new ConcurrentHashMap[Uuid, Int]
 
   /**
    * Returns all actors in the system.
@@ -229,9 +232,15 @@ final class ActorRegistry private[actor] () extends ListenerManagement {
   private[akka] def register(actor: ActorRef) {
     val id = actor.id
     val uuid = actor.uuid
+    val level = actor match {
+      case l : LocalActorRef => l.actor.shutdownLevel
+      case _ => sys.error("only LocalActorRef allowed in ActorRegistry")
+    }
 
     actorsById.put(id, actor)
     actorsByUUID.put(uuid, actor)
+    actorsByLevel.add(level, actor)
+    shutdownLevel.put(uuid, level)
 
     // notify listeners
     notifyListeners(ActorRegistered(actor))
@@ -246,6 +255,8 @@ final class ActorRegistry private[actor] () extends ListenerManagement {
 
     actorsByUUID remove uuid
     actorsById.remove(id,actor)
+    val level = shutdownLevel.remove(uuid)
+    actorsByLevel.remove(level, actor)
 
     // notify listeners
     notifyListeners(ActorUnregistered(actor))
@@ -254,22 +265,28 @@ final class ActorRegistry private[actor] () extends ListenerManagement {
   /**
    * Shuts down and unregisters all actors in the system.
    */
-  def shutdownAll() {
+  def shutdownAll(from: Int = Int.MinValue, to: Int = Int.MaxValue) {
+    import scala.collection.JavaConversions._
+
     if (TypedActorModule.isEnabled) {
-      val elements = actorsByUUID.elements
-      while (elements.hasMoreElements) {
-        val actorRef = elements.nextElement
-        val proxy = typedActorFor(actorRef)
-        if (proxy.isDefined) TypedActorModule.typedActorObjectInstance.get.stop(proxy.get)
-        else actorRef.stop()
+      for (set <- actorsByLevel.between(from, true, to, true); actor <- set) {
+        typedActorFor(actor) match {
+          case Some(proxy) =>
+            TypedActorModule.typedActorObjectInstance.get.stop(proxy)
+          case None =>
+            actor.stop()
+        }
       }
-    } else foreach(_.stop())
+    } else {
+      for (set <- actorsByLevel.between(from, true, to, true); actor <- set) { actor.stop() }
+    }
     if (Remote.isEnabled) {
       Actor.remote.clear //TODO: REVISIT: Should this be here?
     }
     actorsByUUID.clear
     actorsById.clear
   }
+
 }
 
 /**
