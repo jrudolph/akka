@@ -36,6 +36,8 @@ class Slf4jEventHandler extends Actor with Logging {
   self.id = ID
   self.dispatcher = EventHandlerDispatcher
 
+  override val shutdownLevel = config.getInt("akka.event-handler.shutdownLevel", 1000000)
+
   def receive = {
     case Error(cause, instance, message) =>
       log.error("\n\t[{}]\n\t[{}]\n\t[{}]",
