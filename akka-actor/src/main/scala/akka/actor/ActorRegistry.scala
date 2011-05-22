@@ -13,7 +13,7 @@ import java.lang.{Integer => JInt}
 
 import annotation.tailrec
 import akka.util.ReflectiveAccess._
-import akka.util. {ReflectiveAccess, ReadWriteGuard, ListenerManagement, ConcurrentMultiMap}
+import akka.util. {ReflectiveAccess, ReadWriteGuard, ListenerManagement, LevelMap}
 
 /**
  * Base trait for ActorRegistry events, allows listen to when an actor is added and removed from the ActorRegistry.
@@ -42,7 +42,7 @@ final class ActorRegistry private[actor] () extends ListenerManagement {
   private val actorsByUUID    = new ConcurrentHashMap[Uuid, ActorRef]
   private val actorsById      = new Index[String,ActorRef]
   private val guard           = new ReadWriteGuard
-  private val actorsByLevel   = new ConcurrentMultiMap[JInt, ActorRef]
+  private val actorsByLevel   = new LevelMap[JInt, ActorRef]
   private val shutdownLevel   = new ConcurrentHashMap[Uuid, Int]
 
   /**
