@@ -13,7 +13,7 @@ object DispatcherActorSpec {
     self.dispatcher = Dispatchers.newDispatcher(self.uuid.toString).build
     def receive = {
       case "Hello" ⇒
-        self.reply("World")
+        currentMessage.reply("World")
       case "Failure" ⇒
         throw new RuntimeException("Expected exception; to test fault-tolerance")
     }

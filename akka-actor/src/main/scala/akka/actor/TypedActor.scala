@@ -28,8 +28,8 @@ object TypedActor {
         try {
           m match {
             case m if m.isOneWay        ⇒ m(me)
-            case m if m.returnsFuture_? ⇒ self.senderFuture.get completeWith m(me).asInstanceOf[Future[Any]]
-            case m                      ⇒ self reply m(me)
+            case m if m.returnsFuture_? ⇒ currentMessage.senderFuture.get completeWith m(me).asInstanceOf[Future[Any]]
+            case m                      ⇒ currentMessage reply m(me)
           }
         } finally { selfReference set null }
     }

@@ -51,7 +51,7 @@ object FickleFriends {
         }
       }
 
-      case GetCount ⇒ self.reply(count.get)
+      case GetCount ⇒ currentMessage.reply(count.get)
     }
   }
 
@@ -86,7 +86,7 @@ object FickleFriends {
         }
       }
 
-      case GetCount ⇒ self.reply(count.get)
+      case GetCount ⇒ currentMessage.reply(count.get)
     }
   }
 }

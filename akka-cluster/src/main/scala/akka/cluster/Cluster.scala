@@ -1511,10 +1511,10 @@ class RemoteClusterDaemon(cluster: ClusterNode) extends Actor {
                 "None of 'uuid', or 'address' is specified, ignoring remote cluster daemon command [%s]"
                   .format(message))
             }
-            self.reply(Success)
+            currentMessage.reply(Success)
           } catch {
             case error ⇒
-              self.reply(Failure(error))
+              currentMessage.reply(Failure(error))
               throw error
           }
 
@@ -1562,7 +1562,7 @@ class RemoteClusterDaemon(cluster: ClusterNode) extends Actor {
 
             def receive = {
               case f: Function0[Any] ⇒ try {
-                self.reply(f())
+                currentMessage.reply(f())
               } finally {
                 self.stop()
               }
@@ -1588,7 +1588,7 @@ class RemoteClusterDaemon(cluster: ClusterNode) extends Actor {
 
             def receive = {
               case (fun: Function[Any, Unit], param: Any) ⇒ try {
-                self.reply(fun(param))
+                currentMessage.reply(fun(param))
               } finally {
                 self.stop()
               }

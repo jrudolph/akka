@@ -95,7 +95,7 @@ Here is an example of coordinating two simple counter UntypedActors so that they
                   });
               }
           } else if (incoming.equals("GetCount")) {
-              getContext().replyUnsafe(count.get());
+              getCurrentMessage().replyUnsafe(count.get());
           }
       }
   }

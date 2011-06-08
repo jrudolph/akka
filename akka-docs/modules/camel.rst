@@ -227,7 +227,7 @@ from localhost on port 8877.
      def endpointUri = "jetty:http://localhost:8877/camel/default"
 
      def receive = {
-       case msg: Message => self.reply("Hello %s" format msg.bodyAs[String])
+       case msg: Message => currentMessage.reply("Hello %s" format msg.bodyAs[String])
      }
    }
 
@@ -246,13 +246,13 @@ from localhost on port 8877.
      public void onReceive(Object message) {
        Message msg = (Message)message;
        String body = msg.getBodyAs(String.class);
-       getContext().replySafe(String.format("Hello %s", body));
+       getCurrentMessage().replySafe(String.format("Hello %s", body));
      }
    }
 
 After starting the actor, clients can send messages to that actor by POSTing to
 ``http://localhost:8877/camel/default``. The actor sends a response by using the
-self.reply method (Scala). For returning a message body and headers to the HTTP
+currentMessage.reply method (Scala). For returning a message body and headers to the HTTP
 client the response type should be `Message`_. For any other response type, a
 new Message object is created by akka-camel with the actor response as message
 body.
@@ -633,9 +633,9 @@ acknowledgement).
 
      def receive = {
        // ...
-       self.reply(Ack) // on success
+       currentMessage.reply(Ack) // on success
        // ...
-       self.reply(Failure(...)) // on failure
+       currentMessage.reply(Failure(...)) // on failure
      }
    }
 
@@ -659,10 +659,10 @@ acknowledgement).
 
      public void onReceive(Object message) {
        // ...
-       getContext().replyUnsafe(ack()) // on success
+       getCurrentMessage().replyUnsafe(ack()) // on success
        // ...
        val e: Exception = ...
-       getContext().replyUnsafe(new Failure(e)) // on failure
+       getCurrentMessage().replyUnsafe(new Failure(e)) // on failure
      }
    }
 
@@ -839,7 +839,7 @@ following consumer actor class.
      def endpointUri = "jetty:http://localhost:6644/remote-actor-1"
 
      protected def receive = {
-       case msg => self.reply("response from remote actor 1")
+       case msg => currentMessage.reply("response from remote actor 1")
      }
    }
 
@@ -855,7 +855,7 @@ following consumer actor class.
      }
 
      public void onReceive(Object message) {
-       getContext().replySafe("response from remote actor 1");
+       getCurrentMessage().replySafe("response from remote actor 1");
      }
    }
 
@@ -1410,7 +1410,7 @@ For initiating a a two-way message exchange, one of the
    class ProducerActor extends Actor {
      protected def receive = {
        // two-way message exchange with direct:news endpoint
-       case msg => self.reply(CamelContextManager.mandatoryTemplate.requestBody("direct:news", msg))
+       case msg => currentMessage.reply(CamelContextManager.mandatoryTemplate.requestBody("direct:news", msg))
      }
    }
 
@@ -1423,7 +1423,7 @@ For initiating a a two-way message exchange, one of the
 
    public class SampleUntypedActor extends UntypedActor {
        public void onReceive(Object msg) {
-           getContext().replySafe(CamelContextManager.getMandatoryTemplate().requestBody("direct:news", msg));
+           getCurrentMessage().replySafe(CamelContextManager.getMandatoryTemplate().requestBody("direct:news", msg));
        }
    }
 
@@ -1465,7 +1465,7 @@ designed to be asynchronous. This is the case for both, consumer and producer
 actors.
 
 * A consumer endpoint sends request messages to its consumer actor using the ``!``
-  (bang) operator and the actor returns responses with self.reply once they are
+  (bang) operator and the actor returns responses with currentMessage.reply once they are
   ready. The sender reference used for reply is an adapter to Camel's asynchronous
   routing engine that implements the ActorRef trait.
 
@@ -1957,7 +1957,7 @@ ends at the target actor.
 
    class CustomRouteTarget extends Actor {
      def receive = {
-       case msg: Message => self.reply("Hello %s" format msg.bodyAs[String])
+       case msg: Message => currentMessage.reply("Hello %s" format msg.bodyAs[String])
      }
    }
 
@@ -1995,7 +1995,7 @@ ends at the target actor.
        public void onReceive(Object message) {
            Message msg = (Message) message;
            String body = msg.getBodyAs(String.class);
-           getContext().replySafe(String.format("Hello %s", body));
+           getCurrentMessage().replySafe(String.format("Hello %s", body));
        }
    }
 
@@ -2544,8 +2544,8 @@ as shown in the following snippet (see also `sample.camel.Boot`_).
 
    class HttpTransformer extends Actor {
      protected def receive = {
-       case msg: Message => self.reply(msg.transformBody {body: String => body replaceAll ("Akka ", "AKKA ")})
-       case msg: Failure => self.reply(msg)
+       case msg: Message => currentMessage.reply(msg.transformBody {body: String => body replaceAll ("Akka ", "AKKA ")})
+       case msg: Failure => currentMessage.reply(msg)
      }
    }
 
@@ -2724,7 +2724,7 @@ snippet.
      protected def receive = {
        case msg: Message => {
          publisher ! msg.bodyAs[String]
-         self.reply("message published")
+         currentMessage.reply("message published")
        }
      }
    }

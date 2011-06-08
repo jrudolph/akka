@@ -13,7 +13,7 @@ Release 1.1-M1
 
 - **ADD** - #647 Extract an akka-camel-typed module out of akka-camel for optional typed actor support (Martin Krasser)
 - **ADD** - #654 Allow consumer actors to acknowledge in-only message exchanges (Martin Krasser)
-- **ADD** - #669 Support self.reply in preRestart and postStop after exception in receive (Martin Krasser)
+- **ADD** - #669 Support currentMessage.reply in preRestart and postStop after exception in receive (Martin Krasser)
 - **ADD** - #682 Support for fault-tolerant Producer actors (Martin Krasser)
 - **ADD** - Move TestKit to akka-testkit and add CallingThreadDispatcher (Roland Kuhn)
 - **ADD** - Remote Client message buffering transaction log for buffering messages failed to send due to network problems. Flushes the buffer on reconnect. (Jonas Bonér)

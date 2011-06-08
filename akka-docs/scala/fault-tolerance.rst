@@ -317,21 +317,21 @@ Supervised actors have the option to reply to the initial sender within preResta
         // do something that may throw an exception
         // ...
 
-        self.reply("ok")
+        currentMessage.reply("ok")
       }
     }
 
     override def preRestart(reason: scala.Throwable) {
-      self.reply_?(reason.getMessage)
+      currentMessage.reply_?(reason.getMessage)
     }
 
     override def postStop() {
-      self.reply_?("stopped by supervisor")
+      currentMessage.reply_?("stopped by supervisor")
     }
   }
 
-- A reply within preRestart or postRestart must be a safe reply via `self.reply_?` because an unsafe self.reply will throw an exception when the actor is restarted without having failed. This can be the case in context of AllForOne restart strategies.
-- A reply within postStop must be a safe reply via `self.reply_?` because an unsafe self.reply will throw an exception when the actor has been stopped by the application (and not by a supervisor) after successful execution of receive (or no execution at all).
+- A reply within preRestart or postRestart must be a safe reply via `currentMessage.reply_?` because an unsafe currentMessage.reply will throw an exception when the actor is restarted without having failed. This can be the case in context of AllForOne restart strategies.
+- A reply within postStop must be a safe reply via `currentMessage.reply_?` because an unsafe currentMessage.reply will throw an exception when the actor has been stopped by the application (and not by a supervisor) after successful execution of receive (or no execution at all).
 
 Handling too many actor restarts within a specific time limit
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -40,22 +40,22 @@ object TestActorRefSpec {
 
     def receiveT = {
       case "complexRequest" ⇒ {
-        replyTo = self.channel
+        replyTo = currentMessage.channel
         val worker = TestActorRef[WorkerActor].start()
         worker ! "work"
       }
       case "complexRequest2" ⇒
         val worker = TestActorRef[WorkerActor].start()
-        worker ! self.channel
+        worker ! currentMessage.channel
       case "workDone"      ⇒ replyTo ! "complexReply"
-      case "simpleRequest" ⇒ self.reply("simpleReply")
+      case "simpleRequest" ⇒ currentMessage.reply("simpleReply")
     }
   }
 
   class WorkerActor() extends TActor {
     def receiveT = {
       case "work" ⇒ {
-        self.reply("workDone")
+        currentMessage.reply("workDone")
         self.stop()
       }
       case replyTo: Channel[Any] ⇒ {
@@ -111,7 +111,7 @@ class TestActorRefSpec extends WordSpec with MustMatchers with BeforeAndAfterEac
       "used with TestActorRef" in {
         val a = TestActorRef(new Actor {
           val nested = TestActorRef(new Actor { def receive = { case _ ⇒ } }).start()
-          def receive = { case _ ⇒ self reply nested }
+          def receive = { case _ ⇒ currentMessage reply nested }
         }).start()
         a must not be (null)
         val nested = (a !! "any").get.asInstanceOf[ActorRef]
@@ -122,7 +122,7 @@ class TestActorRefSpec extends WordSpec with MustMatchers with BeforeAndAfterEac
       "used with ActorRef" in {
         val a = TestActorRef(new Actor {
           val nested = Actor.actorOf(new Actor { def receive = { case _ ⇒ } }).start()
-          def receive = { case _ ⇒ self reply nested }
+          def receive = { case _ ⇒ currentMessage reply nested }
         }).start()
         a must not be (null)
         val nested = (a !! "any").get.asInstanceOf[ActorRef]

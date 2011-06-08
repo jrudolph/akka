@@ -14,7 +14,7 @@ object ThreadBasedActorSpec {
 
     def receive = {
       case "Hello" ⇒
-        self.reply("World")
+        currentMessage.reply("World")
       case "Failure" ⇒
         throw new RuntimeException("Expected exception; to test fault-tolerance")
     }

@@ -20,7 +20,7 @@ object RoundRobin2ReplicasMultiJvmSpec {
     def receive = {
       case "Hello" ⇒
         println("Received message on [" + Config.nodename + "]")
-        self.reply("World from node [" + Config.nodename + "]")
+        currentMessage.reply("World from node [" + Config.nodename + "]")
     }
   }
 }

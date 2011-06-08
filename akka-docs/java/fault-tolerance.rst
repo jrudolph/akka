@@ -341,22 +341,22 @@ Supervised actors have the option to reply to the initial sender within preResta
           // do something that may throw an exception
           // ...
 
-          getContext().replySafe("ok");
+          getCurrentMessage().replySafe("ok");
       }
 
       @Override
       public void preRestart(Throwable reason) {
-          getContext().replySafe(reason.getMessage());
+          getCurrentMessage().replySafe(reason.getMessage());
       }
 
       @Override
       public void postStop() {
-          getContext().replySafe("stopped by supervisor");
+          getCurrentMessage().replySafe("stopped by supervisor");
       }
   }
 
-- A reply within preRestart or postRestart must be a safe reply via getContext().replySafe() because a getContext().replyUnsafe() will throw an exception when the actor is restarted without having failed. This can be the case in context of AllForOne restart strategies.
-- A reply within postStop must be a safe reply via getContext().replySafe() because a getContext().replyUnsafe() will throw an exception when the actor has been stopped by the application (and not by a supervisor) after successful execution of receive (or no execution at all).
+- A reply within preRestart or postRestart must be a safe reply via getCurrentMessage().replySafe() because a getCurrentMessage().replyUnsafe() will throw an exception when the actor is restarted without having failed. This can be the case in context of AllForOne restart strategies.
+- A reply within postStop must be a safe reply via getCurrentMessage().replySafe() because a getCurrentMessage().replyUnsafe() will throw an exception when the actor has been stopped by the application (and not by a supervisor) after successful execution of receive (or no execution at all).
 
 Handling too many actor restarts within a specific time limit
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

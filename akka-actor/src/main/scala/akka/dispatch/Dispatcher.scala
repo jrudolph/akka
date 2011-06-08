@@ -217,15 +217,15 @@ trait ExecutableMailbox extends Runnable { self: MessageQueue ⇒
     if (!self.suspended.locked) {
       var nextMessage = self.dequeue
       if (nextMessage ne null) { //If we have a message
-        if (dispatcher.throughput <= 1) //If we only run one message per process
-          nextMessage.invoke //Just run it
-        else { //But otherwise, if we are throttled, we need to do some book-keeping
+        if (dispatcher.throughput <= 1) { //If we only run one message per process
+          nextMessage.receiver.invoke(nextMessage) //Just run it
+        } else { //But otherwise, if we are throttled, we need to do some book-keeping
           var processedMessages = 0
           val isDeadlineEnabled = dispatcher.throughputDeadlineTime > 0
           val deadlineNs = if (isDeadlineEnabled) System.nanoTime + TimeUnit.MILLISECONDS.toNanos(dispatcher.throughputDeadlineTime)
           else 0
           do {
-            nextMessage.invoke
+            nextMessage.receiver.invoke(nextMessage)
             nextMessage =
               if (self.suspended.locked) {
                 null // If we are suspended, abort

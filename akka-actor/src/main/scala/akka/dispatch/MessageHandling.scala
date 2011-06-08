@@ -13,6 +13,10 @@ import akka.util.{ Duration, Switch, ReentrantGuard }
 import java.util.concurrent.ThreadPoolExecutor.{ AbortPolicy, CallerRunsPolicy, DiscardOldestPolicy, DiscardPolicy }
 import akka.actor._
 
+object MessageInvocation {
+  val empty = MessageInvocation(null, null, None, None)
+}
+
 /**
  * @author <a href="http://jonasboner.com">Jonas Bon&#233;r</a>
  */
@@ -20,11 +24,82 @@ final case class MessageInvocation(receiver: ActorRef,
                                    message: Any,
                                    sender: Option[ActorRef],
                                    senderFuture: Option[Promise[Any]]) {
-  if (receiver eq null) throw new IllegalArgumentException("Receiver can't be null")
 
-  final def invoke() {
-    receiver invoke this
+  /**
+   * Use <code>currentMessage.reply(..)</code> to reply with a message to the original sender of the message currently
+   * being processed.
+   * <p/>
+   * Throws an IllegalStateException if unable to determine what to reply to.
+   */
+  def reply(message: Any) {
+    if (!reply_?(message)) throw new IllegalActorStateException(
+      "\n\tNo sender in scope, can't reply. " +
+        "\n\tYou have probably: " +
+        "\n\t\t1. Sent a message to an Actor from an instance that is NOT an Actor." +
+        "\n\t\t2. Invoked a method on an TypedActor from an instance NOT an TypedActor." +
+        "\n\tElse you might want to use 'reply_?' which returns Boolean(true) if succes and Boolean(false) if no sender in scope")
   }
+
+  /**
+   * Use <code>reply_?(..)</code> to reply with a message to the original sender of the message currently
+   * being processed.
+   * <p/>
+   * Returns true if reply was sent, and false if unable to determine what to reply to.
+   */
+  def reply_?(message: Any): Boolean = {
+    if (senderFuture.isDefined) {
+      senderFuture.get completeWithResult message
+      true
+    } else if (sender.isDefined) {
+      //TODO: optimize away this allocation, perhaps by having implicit self: Option[ActorRef] in signature
+      sender.get.!(message)(Some(receiver))
+      true
+    } else false
+  }
+
+  /**
+   * Akka Java API. <p/>
+   * Use <code>getCurrentMessage().replyUnsafe(..)</code> to reply with a message to the original sender of the message currently
+   * being processed.
+   * <p/>
+   * Throws an IllegalStateException if unable to determine what to reply to.
+   */
+  def replyUnsafe(message: AnyRef) {
+    reply(message)
+  }
+
+  /**
+   * Akka Java API. <p/>
+   * Use <code>getCurrentMessage().replySafe(..)</code> to reply with a message to the original sender of the message currently
+   * being processed.
+   * <p/>
+   * Returns true if reply was sent, and false if unable to determine what to reply to.
+   */
+  def replySafe(message: AnyRef): Boolean = reply_?(message)
+
+  /**
+   * Abstraction for unification of sender and senderFuture for later reply
+   */
+  def channel: Channel[Any] = {
+    if (senderFuture.isDefined) {
+      new Channel[Any] {
+        val future = senderFuture.get
+        def !(msg: Any) = future completeWithResult msg
+      }
+    } else if (sender.isDefined) {
+      val someSelf = Some(receiver)
+      new Channel[Any] {
+        val client = sender.get
+        def !(msg: Any) = client.!(msg)(someSelf)
+      }
+    } else throw new IllegalActorStateException("No channel available")
+  }
+
+  /**
+   * Java API. <p/>
+   * Abstraction for unification of sender and senderFuture for later reply
+   */
+  def getChannel: Channel[Any] = channel
 }
 
 final case class FutureInvocation[T](future: Promise[T], function: () ⇒ T, cleanup: () ⇒ Unit) extends Runnable {

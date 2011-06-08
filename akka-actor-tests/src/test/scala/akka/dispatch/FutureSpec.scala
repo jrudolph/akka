@@ -11,7 +11,7 @@ object FutureSpec {
   class TestActor extends Actor {
     def receive = {
       case "Hello" ⇒
-        self.reply("World")
+        currentMessage.reply("World")
       case "NoReply" ⇒ {}
       case "Failure" ⇒
         throw new RuntimeException("Expected exception; to test fault-tolerance")
@@ -22,7 +22,7 @@ object FutureSpec {
     def receive = {
       case "Hello" ⇒
         await.await
-        self.reply("World")
+        currentMessage.reply("World")
       case "NoReply" ⇒ { await.await }
       case "Failure" ⇒
         await.await
@@ -61,7 +61,7 @@ class FutureSpec extends JUnitSuite {
   @Test
   def shouldFutureCompose {
     val actor1 = actorOf[TestActor].start()
-    val actor2 = actorOf(new Actor { def receive = { case s: String ⇒ self reply s.toUpperCase } }).start()
+    val actor2 = actorOf(new Actor { def receive = { case s: String ⇒ currentMessage reply s.toUpperCase } }).start()
     val future1 = actor1 !!! "Hello" flatMap ((s: String) ⇒ actor2 !!! s)
     val future2 = actor1 !!! "Hello" flatMap (actor2 !!! (_: String))
     val future3 = actor1 !!! "Hello" flatMap (actor2 !!! (_: Int))
@@ -75,7 +75,7 @@ class FutureSpec extends JUnitSuite {
   @Test
   def shouldFutureComposePatternMatch {
     val actor1 = actorOf[TestActor].start()
-    val actor2 = actorOf(new Actor { def receive = { case s: String ⇒ self reply s.toUpperCase } }).start()
+    val actor2 = actorOf(new Actor { def receive = { case s: String ⇒ currentMessage reply s.toUpperCase } }).start()
     val future1 = actor1 !!! "Hello" collect { case (s: String) ⇒ s } flatMap (actor2 !!! _)
     val future2 = actor1 !!! "Hello" collect { case (n: Int) ⇒ n } flatMap (actor2 !!! _)
     assert((future1.get: Any) === "WORLD")
@@ -88,8 +88,8 @@ class FutureSpec extends JUnitSuite {
   def shouldFutureForComprehension {
     val actor = actorOf(new Actor {
       def receive = {
-        case s: String ⇒ self reply s.length
-        case i: Int    ⇒ self reply (i * 2).toString
+        case s: String ⇒ currentMessage reply s.length
+        case i: Int    ⇒ currentMessage reply (i * 2).toString
       }
     }).start()
 
@@ -118,8 +118,8 @@ class FutureSpec extends JUnitSuite {
     case class Res[T](res: T)
     val actor = actorOf(new Actor {
       def receive = {
-        case Req(s: String) ⇒ self reply Res(s.length)
-        case Req(i: Int)    ⇒ self reply Res((i * 2).toString)
+        case Req(s: String) ⇒ currentMessage reply Res(s.length)
+        case Req(i: Int)    ⇒ currentMessage reply Res((i * 2).toString)
       }
     }).start()
 
@@ -190,7 +190,7 @@ class FutureSpec extends JUnitSuite {
   def shouldFoldResults {
     val actors = (1 to 10).toList map { _ ⇒
       actorOf(new Actor {
-        def receive = { case (add: Int, wait: Int) ⇒ Thread.sleep(wait); self reply_? add }
+        def receive = { case (add: Int, wait: Int) ⇒ Thread.sleep(wait); currentMessage reply_? add }
       }).start()
     }
     val timeout = 10000
@@ -202,7 +202,7 @@ class FutureSpec extends JUnitSuite {
   def shouldFoldResultsByComposing {
     val actors = (1 to 10).toList map { _ ⇒
       actorOf(new Actor {
-        def receive = { case (add: Int, wait: Int) ⇒ Thread.sleep(wait); self reply_? add }
+        def receive = { case (add: Int, wait: Int) ⇒ Thread.sleep(wait); currentMessage reply_? add }
       }).start()
     }
     def futures = actors.zipWithIndex map { case (actor: ActorRef, idx: Int) ⇒ actor.!!![Int]((idx, idx * 200), 10000) }
@@ -217,7 +217,7 @@ class FutureSpec extends JUnitSuite {
           case (add: Int, wait: Int) ⇒
             Thread.sleep(wait)
             if (add == 6) throw new IllegalArgumentException("shouldFoldResultsWithException: expected")
-            self reply_? add
+            currentMessage reply_? add
         }
       }).start()
     }
@@ -235,7 +235,7 @@ class FutureSpec extends JUnitSuite {
   def shouldReduceResults {
     val actors = (1 to 10).toList map { _ ⇒
       actorOf(new Actor {
-        def receive = { case (add: Int, wait: Int) ⇒ Thread.sleep(wait); self reply_? add }
+        def receive = { case (add: Int, wait: Int) ⇒ Thread.sleep(wait); currentMessage reply_? add }
       }).start()
     }
     val timeout = 10000
@@ -251,7 +251,7 @@ class FutureSpec extends JUnitSuite {
           case (add: Int, wait: Int) ⇒
             Thread.sleep(wait)
             if (add == 6) throw new IllegalArgumentException("shouldFoldResultsWithException: expected")
-            self reply_? add
+            currentMessage reply_? add
         }
       }).start()
     }
@@ -280,7 +280,7 @@ class FutureSpec extends JUnitSuite {
       var counter = 1
       def receive = {
         case 'GetNext ⇒
-          self reply counter
+          currentMessage reply counter
           counter += 2
       }
     }).start()

@@ -273,7 +273,7 @@ Here is an example:
 
   class MyActor extends Actor {
     def receive = {
-      case  "hello" => self.reply("world")
+      case  "hello" => currentMessage.reply("world")
     }
   }
 
@@ -301,7 +301,7 @@ The API for server managed remote actors is really simple. 2 methods only:
 
   class HelloWorldActor extends Actor {
     def receive = {
-      case "Hello" => self.reply("World")
+      case "Hello" => currentMessage.reply("World")
     }
   }
 
@@ -330,7 +330,7 @@ They are also useful if you need to perform some cleanup when a client disconnec
 
   class HelloWorldActor extends Actor {
     def receive = {
-      case "Hello" => self.reply("World")
+      case "Hello" => currentMessage.reply("World")
     }
   }
   remote.start("localhost", 2552)
@@ -376,7 +376,7 @@ Paste in the code below into two sbt concole shells. Then run:
 
   class HelloWorldActor extends Actor {
     def receive = {
-      case "Hello" => self.reply("World")
+      case "Hello" => currentMessage.reply("World")
     }
   }
 
@@ -421,7 +421,7 @@ Here is an example of overriding the 'id' field:
   class MyActor extends Actor {
     self.id = newUuid.toString
     def receive = {
-      case  "hello" =>  self.reply("world")
+      case  "hello" =>  currentMessage.reply("world")
     }
   }
 

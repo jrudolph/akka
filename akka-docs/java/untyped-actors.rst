@@ -128,9 +128,9 @@ Or with the sender reference passed along:
 
   actor.sendOneWay("Hello", getContext());
 
-If invoked from within an Actor, then the sending actor reference will be implicitly passed along with the message and available to the receiving Actor in its 'getContext().getSender();' method. He can use this to reply to the original sender or use the 'getContext().reply(message);' method.
+If invoked from within an Actor, then the sending actor reference will be implicitly passed along with the message and available to the receiving Actor in its 'getContext().getSender();' method. He can use this to reply to the original sender or use the 'getCurrentMessage().reply(message);' method.
 
-If invoked from an instance that is **not** an Actor there will be no implicit sender passed along the message and you will get an 'IllegalStateException' if you call 'getContext().reply(..)'.
+If invoked from an instance that is **not** an Actor there will be no implicit sender passed along the message and you will get an 'IllegalStateException' if you call 'getCurrentMessage().reply(..)'.
 
 Send-And-Receive-Eventually
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -250,7 +250,7 @@ We recommend that you as first choice use the channel abstraction instead of the
 Reply using the 'replySafe' and 'replyUnsafe' methods
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-If you want to send a message back to the original sender of the message you just received then you can use the 'getContext().replyUnsafe(..)' method.
+If you want to send a message back to the original sender of the message you just received then you can use the 'getCurrentMessage().replyUnsafe(..)' method.
 
 .. code-block:: java
 
@@ -259,7 +259,7 @@ If you want to send a message back to the original sender of the message you jus
       String msg = (String)message;
       if (msg.equals("Hello")) {
         // Reply to original sender of message using the 'replyUnsafe' method
-        getContext().replyUnsafe(msg + " from " + getContext().getUuid());
+        getCurrentMessage().replyUnsafe(msg + " from " + getContext().getUuid());
       }
     }
   }
@@ -275,7 +275,7 @@ The 'replyUnsafe' method throws an 'IllegalStateException' if unable to determin
       String msg = (String)message;
       if (msg.equals("Hello")) {
         // Reply to original sender of message using the 'replyUnsafe' method
-        if (getContext().replySafe(msg + " from " + getContext().getUuid())) ... // success
+        if (getCurrentMessage().replySafe(msg + " from " + getContext().getUuid())) ... // success
         else ... // handle failure
       }
     }
@@ -331,10 +331,10 @@ Here is an example of how it can be used:
 Summary of reply semantics and options
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-* getContext().reply(...) can be used to reply to an Actor or a Future.
+* getCurrentMessage().reply(...) can be used to reply to an Actor or a Future.
 * getContext().getSender() is a reference to the actor you can reply to, if it exists
 * getContext().getSenderFuture() is a reference to the future you can reply to, if it exists
-* getContext().channel() is a reference providing an abstraction to either self.sender or self.senderFuture if one is set, providing a single reference to store and reply to (the reference equivalent to the 'reply(...)' method).
+* getContext().channel() is a reference providing an abstraction to either currentMessage.sender or currentMessage.senderFuture if one is set, providing a single reference to store and reply to (the reference equivalent to the 'reply(...)' method).
 * getContext().getSender() and getContext().getSenderFuture() will never be set at the same time, as there can only be one reference to accept a reply.
 
 Starting actors

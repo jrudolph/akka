@@ -236,7 +236,7 @@ HotSwap
 
 HotSwap does no longer use behavior stacking by default, but that is an option to both "become" and HotSwap.
 
-HotSwap now takes for Scala a Function from ActorRef to a Receive, the ActorRef passed in is the reference to self, so you can do self.reply() etc.
+HotSwap now takes for Scala a Function from ActorRef to a Receive, the ActorRef passed in is the reference to self, so you can do currentMessage.reply() etc.
 
 ----
 

@@ -59,7 +59,7 @@ object PingPong {
     def receive = {
       case Ping ⇒
         println("---->> PONG")
-        self reply Pong
+        currentMessage reply Pong
     }
   }
 

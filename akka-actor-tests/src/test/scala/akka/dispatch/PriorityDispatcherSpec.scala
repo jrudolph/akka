@@ -33,7 +33,7 @@ class PriorityDispatcherSpec extends WordSpec with MustMatchers {
 
       def receive = {
         case i: Int  ⇒ acc = i :: acc
-        case 'Result ⇒ self reply_? acc
+        case 'Result ⇒ currentMessage reply_? acc
       }
     }).start()
 

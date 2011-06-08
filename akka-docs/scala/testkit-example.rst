@@ -102,7 +102,7 @@ Ray Roestenburg's example code from `his blog <http://roestenburg.agilesquad.com
    class EchoActor extends Actor {
      def receive = {
        case msg => {
-         self.reply(msg)
+         currentMessage.reply(msg)
        }
      }
    }

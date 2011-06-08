@@ -61,7 +61,7 @@ trait DefaultActorPool extends ActorPool { this: Actor ⇒
   protected def _route(): Receive = {
     // for testing...
     case Stat ⇒
-      self reply_? Stats(_delegates length)
+      currentMessage reply_? Stats(_delegates length)
     case max: MaximumNumberOfRestartsWithinTimeRangeReached ⇒
       _delegates = _delegates filterNot { _.uuid == max.victim.uuid }
     case msg ⇒
@@ -195,7 +195,7 @@ trait MailboxPressureCapacitor {
  */
 trait ActiveFuturesPressureCapacitor {
   def pressure(delegates: Seq[ActorRef]): Int =
-    delegates count { _.senderFuture.isDefined }
+    delegates count { _.currentMessage.senderFuture.isDefined }
 }
 
 /**

@@ -250,11 +250,11 @@ Now we can create the worker actor.  This is done by mixing in the ``Actor`` tra
     class Worker extends Actor {
       def receive = {
         case Work(start, nrOfElements) =>
-          self reply Result(calculatePiFor(start, nrOfElements)) // perform the work
+          currentMessage reply Result(calculatePiFor(start, nrOfElements)) // perform the work
       }
     }
 
-As you can see we have now created an ``Actor`` with a ``receive`` method as a handler for the ``Work`` message. In this handler we invoke the ``calculatePiFor(..)`` method, wrap the result in a ``Result`` message and send it back to the original sender using ``self.reply``. In Akka the sender reference is implicitly passed along with the message so that the receiver can always reply or store away the sender reference for future use.
+As you can see we have now created an ``Actor`` with a ``receive`` method as a handler for the ``Work`` message. In this handler we invoke the ``calculatePiFor(..)`` method, wrap the result in a ``Result`` message and send it back to the original sender using ``currentMessage.reply``. In Akka the sender reference is implicitly passed along with the message so that the receiver can always reply or store away the sender reference for future use.
 
 The only thing missing in our ``Worker`` actor is the implementation on the ``calculatePiFor(..)`` method. While there are many ways we can implement this algorithm in Scala, in this introductory tutorial we have chosen an imperative style using a for comprehension and an accumulator::
 
@@ -433,7 +433,7 @@ But before we package it up and run it, let's take a look at the full code now, 
 
         def receive = {
           case Work(start, nrOfElements) =>
-            self reply Result(calculatePiFor(start, nrOfElements)) // perform the work
+            currentMessage reply Result(calculatePiFor(start, nrOfElements)) // perform the work
         }
       }
 

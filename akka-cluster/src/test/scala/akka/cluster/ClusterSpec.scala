@@ -24,7 +24,7 @@ class MyJavaSerializableActor extends Actor with Serializable {
   def receive = {
     case "hello" ⇒
       count = count + 1
-      self.reply("world " + count)
+      currentMessage.reply("world " + count)
   }
 }
 

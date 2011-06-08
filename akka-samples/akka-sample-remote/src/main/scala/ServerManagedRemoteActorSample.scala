@@ -10,7 +10,7 @@ import akka.actor. {ActorRegistry, Actor}
 class HelloWorldActor extends Actor {
   def receive = {
     case "Hello" =>
-      self.reply("World")
+      currentMessage.reply("World")
   }
 }
 

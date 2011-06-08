@@ -66,7 +66,7 @@ Step 1: Define the actor::
     def receive = {
       case "hello" =>
         count = count + 1
-        self.reply("world " + count)
+        currentMessage.reply("world " + count)
     }
   }
 
@@ -121,7 +121,7 @@ Then you use it as follows::
   class MyStatelessActor extends Actor {
     def receive = {
       case "hello" =>
-        self.reply("world")
+        currentMessage.reply("world")
     }
   }
 
@@ -167,7 +167,7 @@ For a Java serializable actor::
     def receive = {
       case "hello" =>
         count = count + 1
-        self.reply("world " + count)
+        currentMessage.reply("world " + count)
     }
   }
 

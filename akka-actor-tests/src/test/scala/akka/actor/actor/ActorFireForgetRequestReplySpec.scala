@@ -21,9 +21,9 @@ object ActorFireForgetRequestReplySpec {
   class ReplyActor extends Actor {
     def receive = {
       case "Send" ⇒
-        self.reply("Reply")
+        currentMessage.reply("Reply")
       case "SendImplicit" ⇒
-        self.sender.get ! "ReplyImplicit"
+        currentMessage.sender.get ! "ReplyImplicit"
     }
   }
 

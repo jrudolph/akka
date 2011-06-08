@@ -234,7 +234,7 @@ demonstrated below:
 
   when(Idle) {
     case Ev(Start(msg)) => // convenience extractor when state data not needed
-      goto(Timer) using (msg, self.channel)
+      goto(Timer) using (msg, currentMessage.channel)
   }
 
   when(Timer, stateTimeout = 12 seconds) {

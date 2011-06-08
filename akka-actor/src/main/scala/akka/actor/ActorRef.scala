@@ -184,7 +184,7 @@ trait ActorRef extends ActorRefShared with java.lang.Comparable[ActorRef] with S
    *  This is a reference to the message currently being processed by the actor
    */
   @volatile
-  protected[akka] var currentMessage: MessageInvocation = null
+  protected[akka] var currentMessage: MessageInvocation = MessageInvocation.empty
 
   /**
    * Comparison only takes uuid into account.
@@ -202,14 +202,14 @@ trait ActorRef extends ActorRefShared with java.lang.Comparable[ActorRef] with S
    * The reference sender Actor of the last received message.
    * Is defined if the message was sent from another Actor, else None.
    */
-  def getSender: Option[ActorRef] = sender
+  def getSender: Option[ActorRef] = currentMessage.sender
 
   /**
    * Akka Java API. <p/>
    * The reference sender future of the last received message.
    * Is defined if the message was sent with sent with '!!' or '!!!', else None.
    */
-  def getSenderFuture: Option[Promise[Any]] = senderFuture
+  def getSenderFuture: Option[Promise[Any]] = currentMessage.senderFuture
 
   /**
    * Is the actor being restarted?
@@ -294,7 +294,7 @@ trait ActorRef extends ActorRefShared with java.lang.Comparable[ActorRef] with S
    * Use this method with care. In most cases it is better to use 'sendOneWay' together with 'getContext().getSender()' to
    * implement request/response message exchanges.
    * <p/>
-   * If you are sending messages using <code>sendRequestReply</code> then you <b>have to</b> use <code>getContext().reply(..)</code>
+   * If you are sending messages using <code>sendRequestReply</code> then you <b>have to</b> use <code>getCurrentMessage().reply(..)</code>
    * to send a reply message to the original sender. If not then the sender will block until the timeout expires.
    */
   def sendRequestReply(message: AnyRef, timeout: Long, sender: ActorRef): AnyRef = {
@@ -328,7 +328,7 @@ trait ActorRef extends ActorRefShared with java.lang.Comparable[ActorRef] with S
    * Use this method with care. In most cases it is better to use 'sendOneWay' together with the 'getContext().getSender()' to
    * implement request/response message exchanges.
    * <p/>
-   * If you are sending messages using <code>sendRequestReplyFuture</code> then you <b>have to</b> use <code>getContext().reply(..)</code>
+   * If you are sending messages using <code>sendRequestReplyFuture</code> then you <b>have to</b> use <code>getCurrentMessage().reply(..)</code>
    * to send a reply message to the original sender. If not then the sender will block until the timeout expires.
    */
   def sendRequestReplyFuture[T <: AnyRef](message: AnyRef, timeout: Long, sender: ActorRef): Future[T] = !!!(message, timeout)(Option(sender)).asInstanceOf[Future[T]]
@@ -341,26 +341,6 @@ trait ActorRef extends ActorRefShared with java.lang.Comparable[ActorRef] with S
     if (sender eq null) throw new IllegalArgumentException("The 'sender' argument to 'forward' can't be null")
     else forward(message)(Some(sender))
   }
-
-  /**
-   * Akka Java API. <p/>
-   * Use <code>getContext().replyUnsafe(..)</code> to reply with a message to the original sender of the message currently
-   * being processed.
-   * <p/>
-   * Throws an IllegalStateException if unable to determine what to reply to.
-   */
-  def replyUnsafe(message: AnyRef) {
-    reply(message)
-  }
-
-  /**
-   * Akka Java API. <p/>
-   * Use <code>getContext().replySafe(..)</code> to reply with a message to the original sender of the message currently
-   * being processed.
-   * <p/>
-   * Returns true if reply was sent, and false if unable to determine what to reply to.
-   */
-  def replySafe(message: AnyRef): Boolean = reply_?(message)
 
   /**
    * Sets the dispatcher for this actor. Needs to be invoked before the actor is started.
@@ -433,30 +413,6 @@ trait ActorRef extends ActorRefShared with java.lang.Comparable[ActorRef] with S
    * please note that the backing map is thread-safe but not immutable
    */
   def getLinkedActors: JMap[Uuid, ActorRef] = linkedActors
-
-  /**
-   * Abstraction for unification of sender and senderFuture for later reply
-   */
-  def channel: Channel[Any] = {
-    if (senderFuture.isDefined) {
-      new Channel[Any] {
-        val future = senderFuture.get
-        def !(msg: Any) = future completeWithResult msg
-      }
-    } else if (sender.isDefined) {
-      val someSelf = Some(this)
-      new Channel[Any] {
-        val client = sender.get
-        def !(msg: Any) = client.!(msg)(someSelf)
-      }
-    } else throw new IllegalActorStateException("No channel available")
-  }
-
-  /**
-   * Java API. <p/>
-   * Abstraction for unification of sender and senderFuture for later reply
-   */
-  def getChannel: Channel[Any] = channel
 
   protected[akka] def invoke(messageHandle: MessageInvocation)
 
@@ -596,7 +552,7 @@ class LocalActorRef private[akka] (private[this] val actorFactory: () ⇒ Actor,
         try {
           actor.postStop()
         } finally {
-          currentMessage = null
+          MessageInvocation.empty
           Actor.registry.unregister(this)
 
           if (ClusterModule.isEnabled) Actor.remote.unregister(this)
@@ -707,10 +663,10 @@ class LocalActorRef private[akka] (private[this] val actorFactory: () ⇒ Actor,
           try {
             cancelReceiveTimeout() // FIXME: leave this here?
             actor(messageHandle.message)
-            currentMessage = null // reset current message after successful invocation
+            MessageInvocation.empty // reset current message after successful invocation
           } catch {
             case e: InterruptedException ⇒
-              currentMessage = null // received message while actor is shutting down, ignore
+              MessageInvocation.empty // received message while actor is shutting down, ignore
             case e ⇒
               handleExceptionInDispatch(e, messageHandle.message)
           }
@@ -809,7 +765,7 @@ class LocalActorRef private[akka] (private[this] val actorFactory: () ⇒ Actor,
                   false // an error or exception here should trigger a retry
               }
               finally {
-                currentMessage = null
+                currentMessage = MessageInvocation.empty
               }
               if (success) {
                 _status = ActorRefInternals.RUNNING
@@ -877,7 +833,7 @@ class LocalActorRef private[akka] (private[this] val actorFactory: () ⇒ Actor,
     //Prevent any further messages to be processed until the actor has been restarted
     dispatcher.suspend(this)
 
-    senderFuture.foreach(_.completeWithException(reason))
+    currentMessage.senderFuture.foreach(_.completeWithException(reason))
 
     if (supervisor.isDefined) notifySupervisorWithMessage(Exit(this, reason))
     else {
@@ -1120,26 +1076,6 @@ trait ScalaActorRef extends ActorRefShared { ref: ActorRef ⇒
   var faultHandler: FaultHandlingStrategy = NoFaultHandlingStrategy
 
   /**
-   * The reference sender Actor of the last received message.
-   * Is defined if the message was sent from another Actor, else None.
-   */
-  def sender: Option[ActorRef] = {
-    val msg = currentMessage
-    if (msg eq null) None
-    else msg.sender
-  }
-
-  /**
-   * The reference sender future of the last received message.
-   * Is defined if the message was sent with sent with '!!' or '!!!', else None.
-   */
-  def senderFuture(): Option[Promise[Any]] = {
-    val msg = currentMessage
-    if (msg eq null) None
-    else msg.senderFuture
-  }
-
-  /**
    * Sends a one-way asynchronous message. E.g. fire-and-forget semantics.
    * <p/>
    *
@@ -1168,7 +1104,7 @@ trait ScalaActorRef extends ActorRefShared { ref: ActorRef ⇒
    * <b>NOTE:</b>
    * Use this method with care. In most cases it is better to use '!' together with the 'sender' member field to
    * implement request/response message exchanges.
-   * If you are sending messages using <code>!!</code> then you <b>have to</b> use <code>self.reply(..)</code>
+   * If you are sending messages using <code>!!</code> then you <b>have to</b> use <code>currentMessage.reply(..)</code>
    * to send a reply message to the original sender. If not then the sender will block until the timeout expires.
    */
   def !!(message: Any, timeout: Long = this.timeout)(implicit sender: Option[ActorRef] = None): Option[Any] = {
@@ -1186,7 +1122,7 @@ trait ScalaActorRef extends ActorRefShared { ref: ActorRef ⇒
    * <b>NOTE:</b>
    * Use this method with care. In most cases it is better to use '!' together with the 'sender' member field to
    * implement request/response message exchanges.
-   * If you are sending messages using <code>!!!</code> then you <b>have to</b> use <code>self.reply(..)</code>
+   * If you are sending messages using <code>!!!</code> then you <b>have to</b> use <code>currentMessage.reply(..)</code>
    * to send a reply message to the original sender. If not then the sender will block until the timeout expires.
    */
   def !!![T](message: Any, timeout: Long = this.timeout)(implicit sender: Option[ActorRef] = None): Future[T] = {
@@ -1202,43 +1138,12 @@ trait ScalaActorRef extends ActorRefShared { ref: ActorRef ⇒
    */
   def forward(message: Any)(implicit sender: Some[ActorRef]) = {
     if (isRunning) {
-      if (sender.get.senderFuture.isDefined)
-        postMessageToMailboxAndCreateFutureResultWithTimeout(message, timeout, sender.get.sender, sender.get.senderFuture)
+      val currentMsg = sender.get.currentMessage
+      if (currentMsg.senderFuture.isDefined)
+        postMessageToMailboxAndCreateFutureResultWithTimeout(message, timeout, currentMsg.sender, currentMsg.senderFuture)
       else
-        postMessageToMailbox(message, sender.get.sender)
+        postMessageToMailbox(message, currentMsg.sender)
     } else throw new ActorInitializationException("Actor has not been started, you need to invoke 'actor.start()' before using it")
-  }
-
-  /**
-   * Use <code>self.reply(..)</code> to reply with a message to the original sender of the message currently
-   * being processed.
-   * <p/>
-   * Throws an IllegalStateException if unable to determine what to reply to.
-   */
-  def reply(message: Any) {
-    if (!reply_?(message)) throw new IllegalActorStateException(
-      "\n\tNo sender in scope, can't reply. " +
-        "\n\tYou have probably: " +
-        "\n\t\t1. Sent a message to an Actor from an instance that is NOT an Actor." +
-        "\n\t\t2. Invoked a method on an TypedActor from an instance NOT an TypedActor." +
-        "\n\tElse you might want to use 'reply_?' which returns Boolean(true) if succes and Boolean(false) if no sender in scope")
-  }
-
-  /**
-   * Use <code>reply_?(..)</code> to reply with a message to the original sender of the message currently
-   * being processed.
-   * <p/>
-   * Returns true if reply was sent, and false if unable to determine what to reply to.
-   */
-  def reply_?(message: Any): Boolean = {
-    if (senderFuture.isDefined) {
-      senderFuture.get completeWithResult message
-      true
-    } else if (sender.isDefined) {
-      //TODO: optimize away this allocation, perhaps by having implicit self: Option[ActorRef] in signature
-      sender.get.!(message)(Some(this))
-      true
-    } else false
   }
 }
 

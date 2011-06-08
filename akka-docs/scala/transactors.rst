@@ -60,7 +60,7 @@ Here is an example of coordinating two simple counter Actors so that they both i
           count alter (_ + 1)
         }
       }
-      case GetCount => self.reply(count.get)
+      case GetCount => currentMessage.reply(count.get)
     }
   }
 

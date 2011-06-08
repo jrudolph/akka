@@ -105,7 +105,7 @@
 
       case GetChatLog(_) =>
         val messageList = atomic { chatLog.map(bytes => new String(bytes, "UTF-8")).toList }
-        self.reply(ChatLog(messageList))
+        currentMessage.reply(ChatLog(messageList))
     }
 
     override def postRestart(reason: Throwable) {

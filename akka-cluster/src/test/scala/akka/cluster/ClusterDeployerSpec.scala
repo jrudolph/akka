@@ -12,7 +12,7 @@ import Actor._
 object ClusterDeployerSpec {
   class HelloWorld extends Actor with Serializable {
     def receive = {
-      case "Hello" ⇒ self.reply("World")
+      case "Hello" ⇒ currentMessage.reply("World")
     }
   }
 }

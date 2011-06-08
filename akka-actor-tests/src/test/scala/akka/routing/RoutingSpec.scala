@@ -39,14 +39,14 @@ class RoutingSpec extends WordSpec with MustMatchers {
 
       val t1 = actorOf(new Actor {
         def receive = {
-          case Test1 ⇒ self.reply(3)
-          case Test2 ⇒ self.reply(7)
+          case Test1 ⇒ currentMessage.reply(3)
+          case Test2 ⇒ currentMessage.reply(7)
         }
       }).start()
 
       val t2 = actorOf(new Actor() {
         def receive = {
-          case Test3 ⇒ self.reply(11)
+          case Test3 ⇒ currentMessage.reply(11)
         }
       }).start()
 
@@ -181,7 +181,7 @@ class RoutingSpec extends WordSpec with MustMatchers {
               case _ ⇒
                 count.incrementAndGet
                 latch.countDown()
-                self reply_? "success"
+                currentMessage reply_? "success"
             }
           }).start()
 
@@ -230,7 +230,7 @@ class RoutingSpec extends WordSpec with MustMatchers {
             def receive = {
               case req: String ⇒ {
                 sleepFor(10 millis)
-                self.reply_?("Response")
+                currentMessage.reply_?("Response")
               }
             }
           })

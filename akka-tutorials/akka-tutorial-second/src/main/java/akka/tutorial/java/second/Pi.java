@@ -73,7 +73,7 @@ public class Pi {
     public void onReceive(Object message) {
       if (message instanceof Work) {
         Work work = (Work) message;
-        getContext().replyUnsafe(new Result(calculatePiFor(work.getArg(), work.getNrOfElements()))); // perform the work
+        getCurrentMessage().replyUnsafe(new Result(calculatePiFor(work.getArg(), work.getNrOfElements()))); // perform the work
       } else throw new IllegalArgumentException("Unknown message [" + message + "]");
     }
   }
@@ -137,7 +137,7 @@ public class Pi {
           router.sendOneWay(new Work(arg, nrOfElements), getContext());
         }
         // Assume the gathering behavior
-        become(gather(getContext().getChannel()));
+        become(gather(getCurrentMessage().getChannel()));
       }
     };
 

@@ -258,8 +258,8 @@ trait Endpoint { this: Actor ⇒
 
       if (!endpoints.isEmpty) endpoints.foreach { _.apply(uri) ! req }
       else {
-        self.sender match {
-          case Some(s) ⇒ s reply NoneAvailable(uri, req)
+        currentMessage.sender match {
+          case Some(s) ⇒ s ! NoneAvailable(uri, req)
           case None    ⇒ _na(uri, req)
         }
       }

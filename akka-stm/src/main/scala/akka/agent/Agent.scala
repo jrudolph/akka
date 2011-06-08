@@ -283,8 +283,8 @@ class AgentUpdater[T](agent: Agent[T]) extends Actor {
 
   def receive = {
     case update: Update[T] ⇒
-      self.reply_?(atomic(txFactory) { agent.ref alter update.function })
-    case Get ⇒ self reply agent.get
+      currentMessage.reply_?(atomic(txFactory) { agent.ref alter update.function })
+    case Get ⇒ currentMessage reply agent.get
     case _   ⇒ ()
   }
 }
@@ -299,7 +299,7 @@ class ThreadBasedAgentUpdater[T](agent: Agent[T]) extends Actor {
 
   def receive = {
     case update: Update[T] ⇒ try {
-      self.reply_?(atomic(txFactory) { agent.ref alter update.function })
+      currentMessage.reply_?(atomic(txFactory) { agent.ref alter update.function })
     } finally {
       agent.resume
       self.stop()

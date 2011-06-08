@@ -26,7 +26,7 @@ public class UntypedCounter extends UntypedTransactor {
 
     @Override public boolean normally(Object message) {
         if ("GetCount".equals(message)) {
-            getContext().replyUnsafe(count.get());
+            getCurrentMessage().replyUnsafe(count.get());
             return true;
         } else return false;
     }

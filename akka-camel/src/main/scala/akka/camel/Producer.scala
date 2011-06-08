@@ -98,8 +98,8 @@ trait ProducerSupport { this: Actor ⇒
       val producer = self
       // Need copies of sender and senderFuture references here
       // since the callback could be done later by another thread.
-      val sender = self.sender
-      val senderFuture = self.senderFuture
+      val sender = currentMessage.sender
+      val senderFuture = currentMessage.senderFuture
 
       def done(doneSync: Boolean): Unit = {
         (doneSync, exchange.isFailed) match {
@@ -157,7 +157,7 @@ trait ProducerSupport { this: Actor ⇒
    * actor).
    */
   protected def receiveAfterProduce: Receive = {
-    case msg ⇒ if (!oneway) self.reply(msg)
+    case msg ⇒ if (!oneway) currentMessage.reply(msg)
   }
 
   /**

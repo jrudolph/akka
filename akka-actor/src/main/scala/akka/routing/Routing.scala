@@ -52,7 +52,10 @@ trait Router { this: Actor ⇒
 
   def receive = dispatch
 
-  private def isSenderDefined = self.senderFuture.isDefined || self.sender.isDefined
+  private def isSenderDefined = {
+    val msg = currentMessage
+    msg.senderFuture.isDefined || msg.sender.isDefined
+  }
 }
 
 /**
@@ -65,7 +68,10 @@ abstract class UntypedRouter extends UntypedActor {
 
   protected def broadcast(message: Any) {}
 
-  private def isSenderDefined = self.senderFuture.isDefined || self.sender.isDefined
+  private def isSenderDefined = {
+    val msg = currentMessage
+    msg.senderFuture.isDefined || msg.sender.isDefined
+  }
 
   @throws(classOf[Exception])
   def onReceive(msg: Any): Unit = msg match {

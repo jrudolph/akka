@@ -5,6 +5,7 @@
 package akka.actor
 
 import akka.japi.{ Creator, Procedure }
+import akka.dispatch.MessageInvocation
 
 /**
  * Subclass this abstract class to create a MDB-style untyped actor.
@@ -20,7 +21,7 @@ import akka.japi.{ Creator, Procedure }
  *
  *        if (msg.equals("UseReply")) {
  *          // Reply to original sender of message using the 'replyUnsafe' method
- *          getContext().replyUnsafe(msg + ":" + getContext().getUuid());
+ *          getCurrentMessage().replyUnsafe(msg + ":" + getContext().getUuid());
  *
  *        } else if (msg.equals("UseSender") && getContext().getSender().isDefined()) {
  *          // Reply to original sender of message using the sender reference
@@ -71,6 +72,8 @@ abstract class UntypedActor extends Actor {
    * Returns the 'self' reference with the API.
    */
   def context(): ActorRef = self
+
+  def getCurrentMessage(): MessageInvocation = currentMessage
 
   /**
    * Java API for become

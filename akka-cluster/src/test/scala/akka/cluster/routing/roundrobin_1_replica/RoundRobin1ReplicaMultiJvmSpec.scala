@@ -19,7 +19,7 @@ object RoundRobin1ReplicaMultiJvmSpec {
   class HelloWorld extends Actor with Serializable {
     def receive = {
       case "Hello" ⇒
-        self.reply("World from node [" + Config.nodename + "]")
+        currentMessage.reply("World from node [" + Config.nodename + "]")
     }
   }
 }

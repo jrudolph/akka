@@ -545,12 +545,12 @@ trait Actor {
    * self.trapExit = ...
    * self.faultHandler = ...
    * self.lifeCycle = ...
-   * self.sender
+   * currentMessage.sender
    * </pre>
    * <p/>
    * Here you also find methods like:
    * <pre>
-   * self.reply(..)
+   * currentMessage.reply(..)
    * self.link(..)
    * self.unlink(..)
    * self.start(..)
@@ -571,7 +571,7 @@ trait Actor {
    *   def receive = {
    *     case Ping =&gt;
    *       println("got a 'Ping' message")
-   *       self.reply("pong")
+   *       currentMessage.reply("pong")
    *
    *     case OneWay =&gt;
    *       println("got a 'OneWay' message")
@@ -582,6 +582,12 @@ trait Actor {
    * </pre>
    */
   protected def receive: Receive
+
+  /**
+   * WARNING! Can be null if called outside of receive block
+   * Returns a reference to the current message with metadata.
+   */
+  protected final def currentMessage: MessageInvocation = self.currentMessage
 
   /**
    * User overridable callback.
@@ -645,7 +651,7 @@ trait Actor {
 
   private[akka] final def apply(msg: Any) = {
     if (msg.isInstanceOf[AnyRef] && (msg.asInstanceOf[AnyRef] eq null))
-      throw new InvalidMessageException("Message from [" + self.sender + "] to [" + self.toString + "] is null")
+      throw new InvalidMessageException("Message from [" + currentMessage.sender + "] to [" + self.toString + "] is null")
 
     val behaviorStack = self.hotswap
 
@@ -675,7 +681,7 @@ trait Actor {
       case Restart(reason)           ⇒ throw reason
       case Kill                      ⇒ throw new ActorKilledException("Kill")
       case PoisonPill ⇒
-        val f = self.senderFuture()
+        val f = currentMessage.senderFuture
         self.stop()
         if (f.isDefined) f.get.completeWithException(new ActorKilledException("PoisonPill"))
     }

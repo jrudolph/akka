@@ -146,7 +146,7 @@ This is the preferred way of sending messages. No blocking waiting for a message
 
 If invoked from within an Actor, then the sending actor reference will be implicitly passed along with the message and available to the receiving Actor in its ``sender: Option[AnyRef]`` member field. He can use this to reply to the original sender or use the ``reply(message: Any)`` method.
 
-If invoked from an instance that is **not** an Actor there will be no implicit sender passed along the message and you will get an IllegalStateException if you call ``self.reply(..)``.
+If invoked from an instance that is **not** an Actor there will be no implicit sender passed along the message and you will get an IllegalStateException if you call ``currentMessage.reply(..)``.
 
 Send-And-Receive-Eventually
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -266,18 +266,18 @@ Reply using the channel
 ^^^^^^^^^^^^^^^^^^^^^^^
 
 If you want to have a handle to an object to whom you can reply to the message, you can use the ``Channel`` abstraction.
-Simply call ``self.channel`` and then you can forward that to others, store it away or otherwise until you want to reply, which you do by ``Channel ! response``:
+Simply call ``currentMessage.channel`` and then you can forward that to others, store it away or otherwise until you want to reply, which you do by ``Channel ! response``:
 
 .. code-block:: scala
 
   case request =>
       val result = process(request)
-      self.channel ! result
+      currentMessage.channel ! result
 
 .. code-block:: scala
 
   case request =>
-      friend forward self.channel
+      friend forward currentMessage.channel
 
 We recommend that you as first choice use the channel abstraction instead of the other ways described in the following sections.
 
@@ -290,7 +290,7 @@ If you want to send a message back to the original sender of the message you jus
 
   case request =>
     val result = process(request)
-    self.reply(result)
+    currentMessage.reply(result)
 
 In this case the ``result`` will be send back to the Actor that sent the ``request``.
 
@@ -300,7 +300,7 @@ The ``reply`` method throws an ``IllegalStateException`` if unable to determine 
 
   case request =>
     val result = process(request)
-    if (self.reply_?(result)) ...// success
+    if (currentMessage.reply_?(result)) ...// success
     else ... // handle failure
 
 Reply using the sender reference
@@ -313,7 +313,7 @@ If the sender is an Actor then its reference will be implicitly passed along tog
   // receiver code
   case request =>
     val result = process(request)
-    self.sender.get ! result
+    currentMessage.sender.get ! result
 
 It's important to know that ``sender.get`` will throw an exception if the ``sender`` is not defined, e.g. the ``Option`` is ``None``. You can check if it is defined by invoking the ``sender.isDefined`` method, but a more elegant solution is to use ``foreach`` which will only be executed if the sender is defined in the ``sender`` member ``Option`` field. If it is not, then the operation in the ``foreach`` method is ignored.
 
@@ -322,7 +322,7 @@ It's important to know that ``sender.get`` will throw an exception if the ``send
   // receiver code
   case request =>
     val result = process(request)
-    self.sender.foreach(_ ! result)
+    currentMessage.sender.foreach(_ ! result)
 
 The same pattern holds for using the ``senderFuture`` in the section below.
 
@@ -340,7 +340,7 @@ Here is an example of how it can be used:
   case request =>
     try {
       val result = process(request)
-      self.senderFuture.foreach(_.completeWithResult(result))
+      currentMessage.senderFuture.foreach(_.completeWithResult(result))
     } catch {
       case e =>
         senderFuture.foreach(_.completeWithException(this, e))
@@ -350,11 +350,11 @@ Here is an example of how it can be used:
 Summary of reply semantics and options
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-* ``self.reply(...)`` can be used to reply to an ``Actor`` or a ``Future``.
-* ``self.sender`` is a reference to the ``Actor`` you can reply to, if it exists
-* ``self.senderFuture`` is a reference to the ``Future`` you can reply to, if it exists
-* ``self.channel`` is a reference providing an abstraction to either ``self.sender`` or ``self.senderFuture`` if one is set, providing a single reference to store and reply to (the reference equivalent to the ``reply(...)`` method).
-* ``self.sender`` and ``self.senderFuture`` will never be set at the same time, as there can only be one reference to accept a reply.
+* ``currentMessage.reply(...)`` can be used to reply to an ``Actor`` or a ``Future``.
+* ``currentMessage.sender`` is a reference to the ``Actor`` you can reply to, if it exists
+* ``currentMessage.senderFuture`` is a reference to the ``Future`` you can reply to, if it exists
+* ``currentMessage.channel`` is a reference providing an abstraction to either ``currentMessage.sender`` or ``currentMessage.senderFuture`` if one is set, providing a single reference to store and reply to (the reference equivalent to the ``reply(...)`` method).
+* ``currentMessage.sender`` and ``currentMessage.senderFuture`` will never be set at the same time, as there can only be one reference to accept a reply.
 
 Initial receive timeout
 -----------------------
@@ -447,7 +447,7 @@ To hotswap the Actor body using the ``HotSwap`` message:
 .. code-block:: scala
 
   actor ! HotSwap( self => {
-    case message => self.reply("hotswapped body")
+    case message => currentMessage.reply("hotswapped body")
   })
 
 Using the ``HotSwap`` message for hotswapping has its limitations. You can not replace it with any code that uses the Actor's ``self`` reference. If you need to do that the the ``become`` method is better.
@@ -457,12 +457,12 @@ To hotswap the Actor using ``become``:
 .. code-block:: scala
 
   def angry: Receive = {
-    case "foo" => self reply "I am already angry!!!"
+    case "foo" => currentMessage reply "I am already angry!!!"
     case "bar" => become(happy)
   }
 
   def happy: Receive = {
-    case "bar" => self reply "I am already happy :-)"
+    case "bar" => currentMessage reply "I am already happy :-)"
     case "foo" => become(angry)
   }
 

@@ -187,7 +187,7 @@ class CallingThreadDispatcher(val warnings: Boolean = true) extends MessageDispa
       }
       if (handle ne null) {
         try {
-          handle.invoke
+          handle.receiver.invoke(handle)
           val f = handle.senderFuture
           if (warnings && f.isDefined && !f.get.isCompleted) {
             EventHandler.warning(this, "calling %s with message %s did not reply as expected, might deadlock" format (handle.receiver, handle.message))

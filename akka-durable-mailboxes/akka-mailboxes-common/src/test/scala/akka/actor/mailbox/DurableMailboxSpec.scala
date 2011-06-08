@@ -17,7 +17,7 @@ object DurableMailboxSpecActorFactory {
   class MailboxTestActor extends Actor {
     self.lifeCycle = Temporary
     def receive = {
-      case "sum" => self.reply("sum")
+      case "sum" => currentMessage.reply("sum")
     }
   }
 
