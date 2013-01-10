@@ -28,12 +28,33 @@ object Tcp {
     def data: ByteString
     def ack: AnyRef
     def nack: AnyRef
+
+    def withData(newData: ByteString): Write
+    def consumeNack: Write
   }
   object Write {
-    def apply(_data: ByteString): Write = new Write {
+    def apply(_data: ByteString): Write = apply(_data, null)
+    def apply(_data: ByteString, _ack: AnyRef): Write = new Write {
       def data: ByteString = _data
-      def ack: AnyRef = null
+      def ack: AnyRef = _ack
       def nack: AnyRef = null
+
+      def withData(newData: ByteString): Write =
+        apply(newData, _ack)
+
+      def consumeNack: Write =
+        this
+    }
+    def apply(_data: ByteString, _ack: AnyRef, _nack: AnyRef): Write = new Write {
+      def data: ByteString = _data
+      def ack: AnyRef = _ack
+      def nack: AnyRef = _nack
+
+      def withData(newData: ByteString): Write =
+        apply(newData, _ack, _nack)
+
+      def consumeNack: Write =
+        apply(_data, _ack)
     }
   }
   case object StopReading extends Command
