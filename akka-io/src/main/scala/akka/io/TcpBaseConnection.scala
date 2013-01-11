@@ -44,7 +44,7 @@ trait TcpBaseConnection { self: Actor ⇒
 
         if (remaining != null)
           context.become(connected(handler, writeQueue.enqueue(remaining)))
-        //else: we just wrote the message
+        //else: we just wrote the message, nothing to do here
       }
 
     case Tcp.ChannelWritable ⇒
@@ -58,6 +58,9 @@ trait TcpBaseConnection { self: Actor ⇒
         // we maybe could write even more but give the actor the possibility to
         // read (or do something else) in between
         context.self ! Tcp.ChannelWritable
+
+    case Tcp.StopReading   ⇒ selector ! StopReading
+    case Tcp.ResumeReading ⇒ selector ! ReadInterest
   }
 
   def doWrite(handler: ActorRef, writeMsg: Tcp.Write): Tcp.Write = {

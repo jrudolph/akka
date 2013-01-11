@@ -147,8 +147,16 @@ class TcpConnectionSpec extends AkkaSpec with ImplicitSender {
         connectionHandler.expectMsg(Ack)
       }
 
-    "respect StopReading and ResumeReading" in {
-      pending
+    "respect StopReading and ResumeReading" in withEstablishedConnection() { setup ⇒
+      import setup._
+
+      connectionActor.tell(StopReading, userHandler.ref)
+      // the selector interprets StopReading to deregister interest
+      // for reading
+      selector.expectMsg(StopReading)
+
+      connectionActor.tell(ResumeReading, userHandler.ref)
+      selector.expectMsg(ReadInterest)
     }
 
     // error conditions
