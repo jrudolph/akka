@@ -13,79 +13,65 @@ trait TcpBaseConnection { self: Actor ⇒
   def selector: ActorRef
   def handler: ActorRef
 
-  // FIXME: put into settings proper
-  val ReadBufferSize = 4096
+  var remainingWrite: Write = null
 
-  def connected(handler: ActorRef, writeQueue: Queue[Write]): Receive = {
+  def connected(handler: ActorRef): Receive = {
+    case Tcp.StopReading   ⇒ selector ! StopReading
+    case Tcp.ResumeReading ⇒ selector ! ReadInterest
     case Tcp.ChannelReadable ⇒
+
       // new data arrived on the network
-      val buffer = ByteBuffer.allocate(ReadBufferSize)
+      val buffer = DirectBufferPool.get()
       val read = channel.read(buffer)
       buffer.flip()
 
       if (read > 0) {
-        // FIXME: compact or not?
-        handler ! Received(ByteString.apply(buffer).take(read).compact)
+        handler ! Received(ByteString.apply(buffer).take(read))
 
         // try reading more
+        // FIXME: loop here directly? if yes, how often?
         context.self ! ChannelReadable
-      } else // we drained the network buffer
+      } else // we drained the incoming network buffer
         selector ! ReadInterest
 
     case writeMsg: Tcp.Write ⇒
-      if (writeQueue.nonEmpty) {
+      if (remainingWrite != null) {
         if (writeMsg.nack != null)
           handler ! writeMsg.nack
-
-        // FIXME: should the nack send here?
-        context.become(connected(handler, writeQueue.enqueue(writeMsg.consumeNack)))
-      } else {
-        val remaining = doWrite(handler, writeMsg)
-
-        if (remaining != null)
-          context.become(connected(handler, writeQueue.enqueue(remaining)))
-        //else: we just wrote the message, nothing to do here
-      }
+      } else
+        tryWrite(handler, writeMsg)
 
     case Tcp.ChannelWritable ⇒
-      assert(writeQueue.nonEmpty)
+      assert(remainingWrite != null)
 
-      val first = writeQueue.head
-      val remaining = doWrite(handler, first)
-      if (remaining != null) // not all could be written, update head of queue
-        context.become(connected(handler, remaining +: writeQueue.tail))
-      else
-        // we maybe could write even more but give the actor the possibility to
-        // read (or do something else) in between
-        context.self ! Tcp.ChannelWritable
-
-    case Tcp.StopReading   ⇒ selector ! StopReading
-    case Tcp.ResumeReading ⇒ selector ! ReadInterest
+      tryWrite(handler, remainingWrite)
   }
 
-  def doWrite(handler: ActorRef, writeMsg: Tcp.Write): Tcp.Write = {
+  def tryWrite(handler: ActorRef, writeMsg: Tcp.Write): Unit = {
     // data should be written on the network
     val data = writeMsg.data
 
-    val wrote = channel.write(data.asByteBuffer)
-    if (wrote < data.length) {
-      // couldn't write all data we have to queue the rest
-      selector ! WriteInterest
+    val buffer = DirectBufferPool.get()
+    data.copyToBuffer(buffer)
+    buffer.flip()
+    val wrote = channel.write(buffer)
 
-      if (writeMsg.nack != null)
-        handler ! writeMsg.nack
+    remainingWrite =
+      if (wrote == 0) {
+        selector ! WriteInterest
 
-      // nack is sent only once only once so it is dropped here
-      // consciously
-      val newWrite = Write(data.drop(wrote), writeMsg.ack)
+        writeMsg
+      } else if (wrote < data.length) {
+        val newWrite = writeMsg.withData(data.drop(wrote))
+        selector ! WriteInterest
 
-      newWrite
-    } else { // wrote == data.length, wrote everything
-      if (writeMsg.ack != null)
-        handler ! writeMsg.ack
+        newWrite
+      } else { // wrote == data.length, wrote everything
+        if (writeMsg.ack != null)
+          handler ! writeMsg.ack
 
-      null
-    }
+        null
+      }
   }
 
   def completeConnect: Unit = {
@@ -99,6 +85,6 @@ trait TcpBaseConnection { self: Actor ⇒
     case Tcp.Register(handler) ⇒
       selector ! Tcp.ReadInterest
 
-      context.become(connected(handler, Queue.empty))
+      context.become(connected(handler))
   }
 }

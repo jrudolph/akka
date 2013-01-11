@@ -8,6 +8,7 @@ import java.nio.channels.{ SocketChannel, ServerSocketChannel }
 import akka.io.Tcp._
 import java.nio.ByteBuffer
 import akka.util.ByteString
+import scala.concurrent.duration._
 
 class TcpConnectionSpec extends AkkaSpec with ImplicitSender {
   val port = 45679
@@ -101,32 +102,37 @@ class TcpConnectionSpec extends AkkaSpec with ImplicitSender {
       withEstablishedConnection(_.setOption(StandardSocketOptions.SO_RCVBUF, 1024: Integer)) { setup ⇒
         import setup._
 
-        object Ack
-        object NAck
+        object Ack1
+        object Ack2
+        object NAck1
+        object NAck2
+        val TestSize = 10000
+
+        def writeCmd(ack: AnyRef, nack: AnyRef) =
+          Write(ByteString(Array.fill[Byte](TestSize)(0)), ack, nack)
 
         //serverSideChannel.configureBlocking(false)
         clientSideChannel.setOption(StandardSocketOptions.SO_SNDBUF, 1024: Integer)
 
-        val TestSize = 10000
         // producing backpressure by sending much more than currently fits into
         // our send buffer
-        val write = Write(ByteString(Array.fill[Byte](TestSize)(0)), Ack, NAck)
+        val firstWrite = writeCmd(Ack1, NAck1)
 
         // try to write the buffer but since the SO_SNDBUF is too small
-        // it will tell immediately
-        connectionActor.tell(write, connectionHandler.ref)
-        connectionHandler.expectMsg(NAck)
+        // it will have to keep the rest of the piece and send it
+        // when possible
+        connectionActor.tell(firstWrite, connectionHandler.ref)
         selector.expectMsg(WriteInterest)
 
-        // send another write which should nack immediately as well
-        connectionActor.tell(write, connectionHandler.ref)
-        connectionHandler.expectMsg(NAck)
+        // send another write which should nack immediately
+        // because we don't store more than one piece in flight
+        connectionActor.tell(writeCmd(Ack2, NAck2), connectionHandler.ref)
+        connectionHandler.expectMsg(NAck2)
 
         // there will be immediately more space in the SND_BUF because
         // some data will have been send now, so we assume we can write
         // again, but still it can't write everything
         connectionActor.tell(ChannelWritable, selector.ref)
-        selector.expectMsg(WriteInterest)
 
         // both buffers should now be filled so no more writing
         // is possible
@@ -135,16 +141,19 @@ class TcpConnectionSpec extends AkkaSpec with ImplicitSender {
         val buffer = ByteBuffer.allocate(TestSize)
         @tailrec def drain(remaining: Int): Unit =
           if (remaining > 0) {
+            if (selector.msgAvailable) {
+              selector.expectMsg(WriteInterest)
+              connectionActor.tell(ChannelWritable, selector.ref)
+            }
+
             buffer.clear()
             val read = serverSideChannel.read(buffer)
-
-            connectionActor.tell(ChannelWritable, selector.ref)
 
             drain(remaining - read)
           }
 
         drain(TestSize)
-        connectionHandler.expectMsg(Ack)
+        connectionHandler.expectMsg(Ack1)
       }
 
     "respect StopReading and ResumeReading" in withEstablishedConnection() { setup ⇒
