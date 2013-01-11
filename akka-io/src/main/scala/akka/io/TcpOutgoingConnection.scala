@@ -19,7 +19,7 @@ class TcpOutgoingConnection(val selector: ActorRef,
 
     val connected = channel.connect(remoteAddress)
     if (connected)
-      completeConnect
+      completeConnect()
     else {
       selector ! Tcp.RegisterClientChannel(channel)
 
@@ -34,7 +34,7 @@ class TcpOutgoingConnection(val selector: ActorRef,
     case Tcp.ChannelConnectable ⇒
       val connected = channel.finishConnect()
       assert(connected, "Connectable channel failed to connect")
-      completeConnect
+      completeConnect()
   }
 
   def openChannel(): SocketChannel = {

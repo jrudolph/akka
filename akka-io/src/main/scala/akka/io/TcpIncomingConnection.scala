@@ -7,10 +7,7 @@ import collection.immutable.Queue
 class TcpIncomingConnection(val selector: ActorRef,
                             val handler: ActorRef,
                             val channel: SocketChannel) extends Actor with TcpBaseConnection {
-
-  override def preStart() {
-    completeConnect
-  }
+  completeConnect()
 
   def receive = PartialFunction.empty
 }
