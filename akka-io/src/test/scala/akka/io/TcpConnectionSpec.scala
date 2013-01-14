@@ -4,11 +4,13 @@ import scala.annotation.tailrec
 
 import akka.testkit.{ TestProbe, ImplicitSender, TestActorRef, AkkaSpec }
 import java.net._
-import java.nio.channels.{ SocketChannel, ServerSocketChannel }
+import java.nio.channels.{ SelectionKey, Selector, SocketChannel, ServerSocketChannel }
 import akka.io.Tcp._
 import java.nio.ByteBuffer
 import akka.util.ByteString
 import scala.concurrent.duration._
+import java.nio.channels.spi.SelectorProvider
+import java.io.IOException
 
 class TcpConnectionSpec extends AkkaSpec with ImplicitSender {
   val port = 45679
@@ -99,17 +101,13 @@ class TcpConnectionSpec extends AkkaSpec with ImplicitSender {
       ByteString(buffer).take(8).decodeString("ASCII") must be("testdata")
     }
     "stop writing in cases of backpressure and resume afterwards" in
-      withEstablishedConnection(_.setOption(StandardSocketOptions.SO_RCVBUF, 1024: Integer)) { setup ⇒
+      withEstablishedConnection(setSmallRcvBuffer) { setup ⇒
         import setup._
 
         object Ack1
         object Ack2
         object NAck1
         object NAck2
-        val TestSize = 10000
-
-        def writeCmd(ack: AnyRef, nack: AnyRef) =
-          Write(ByteString(Array.fill[Byte](TestSize)(0)), ack, nack)
 
         //serverSideChannel.configureBlocking(false)
         clientSideChannel.setOption(StandardSocketOptions.SO_SNDBUF, 1024: Integer)
@@ -136,44 +134,133 @@ class TcpConnectionSpec extends AkkaSpec with ImplicitSender {
 
         // both buffers should now be filled so no more writing
         // is possible
-
-        // now drain on the other side until all has been transmitted
-        val buffer = ByteBuffer.allocate(TestSize)
-        @tailrec def drain(remaining: Int): Unit =
-          if (remaining > 0) {
-            if (selector.msgAvailable) {
-              selector.expectMsg(WriteInterest)
-              connectionActor.tell(ChannelWritable, selector.ref)
-            }
-
-            buffer.clear()
-            val read = serverSideChannel.read(buffer)
-
-            drain(remaining - read)
-          }
-
-        drain(TestSize)
+        setup.pullFromServerSide(TestSize)
         connectionHandler.expectMsg(Ack1)
       }
 
     "respect StopReading and ResumeReading" in withEstablishedConnection() { setup ⇒
       import setup._
 
-      connectionActor.tell(StopReading, userHandler.ref)
+      connectionActor.tell(StopReading, connectionHandler.ref)
       // the selector interprets StopReading to deregister interest
       // for reading
       selector.expectMsg(StopReading)
 
-      connectionActor.tell(ResumeReading, userHandler.ref)
+      connectionActor.tell(ResumeReading, connectionHandler.ref)
       selector.expectMsg(ReadInterest)
+    }
+
+    "close the connection" in withEstablishedConnection(setSmallRcvBuffer) { setup ⇒
+      import setup._
+
+      /*println("Port: " + clientSideChannel.getLocalAddress)
+      val sel = SelectorProvider.provider().openSelector()
+      serverSideChannel.configureBlocking(false)
+      serverSideChannel.register(sel, SelectionKey.OP_READ)*/
+
+      // we should test here that a pending write command is properly finished first
+      object Ack
+      // set an artificially small send buffer size so that the write is queued
+      // inside the connection actor
+      clientSideChannel.setOption(StandardSocketOptions.SO_SNDBUF, 1024: Integer)
+
+      // we send a write and a close command directly afterwards
+      connectionActor.tell(writeCmd(Ack, null), connectionHandler.ref)
+      connectionActor.tell(Close, connectionHandler.ref)
+
+      setup.pullFromServerSide(TestSize)
+      connectionHandler.expectMsg(Ack)
+      connectionHandler.expectMsg(Closed)
+      connectionActor.isTerminated must be(true)
+
+      //val res = sel.select()
+      val buffer = ByteBuffer.allocate(1)
+      serverSideChannel.read(buffer) must be(-1)
+    }
+
+    "abort the connection" in withEstablishedConnection() { setup ⇒
+      import setup._
+
+      connectionActor.tell(Abort, connectionHandler.ref)
+      connectionHandler.expectMsg(Abort)
+      connectionActor.isTerminated must be(true)
+
+      val buffer = ByteBuffer.allocate(1)
+      val thrown = evaluating { serverSideChannel.read(buffer) } must produce[IOException]
+      thrown.getMessage must be("Connection reset by peer")
+    }
+
+    "close the connection and confirm" in withEstablishedConnection(setSmallRcvBuffer) { setup ⇒
+      import setup._
+
+      // we should test here that a pending write command is properly finished first
+      object Ack
+      // set an artificially small send buffer size so that the write is queued
+      // inside the connection actor
+      clientSideChannel.setOption(StandardSocketOptions.SO_SNDBUF, 1024: Integer)
+
+      // we send a write and a close command directly afterwards
+      connectionActor.tell(writeCmd(Ack, null), connectionHandler.ref)
+      connectionActor.tell(ConfirmedClose, connectionHandler.ref)
+
+      setup.pullFromServerSide(TestSize)
+      connectionHandler.expectMsg(Ack)
+
+      connectionActor.tell(ChannelReadable, selector.ref)
+      connectionHandler.expectNoMsg(100.millis) // not yet
+
+      val buffer = ByteBuffer.allocate(1)
+      serverSideChannel.read(buffer) must be(-1)
+      serverSideChannel.close()
+
+      connectionActor.tell(ChannelReadable, selector.ref)
+      connectionHandler.expectMsg(ConfirmedClosed)
+      connectionActor.isTerminated must be(true)
+    }
+
+    "peer closed the connection" in withEstablishedConnection() { setup ⇒
+      import setup._
+
+      serverSideChannel.close()
+
+      connectionActor.tell(ChannelReadable, selector.ref)
+      connectionHandler.expectMsg(PeerClosed)
+      connectionActor.isTerminated must be(true)
+    }
+    "peer aborted the connection" in withEstablishedConnection() { setup ⇒
+      import setup._
+
+      serverSideChannel.setOption(StandardSocketOptions.SO_LINGER, 0: Integer)
+      serverSideChannel.close()
+
+      connectionActor.tell(ChannelReadable, selector.ref)
+      connectionHandler.expectMsgPF(remaining) {
+        case ErrorClose(exc: IOException) if exc.getMessage == "Connection reset by peer" ⇒
+      }
+      connectionActor.isTerminated must be(true)
+    }
+    "peer closed the connection when trying to write" in withEstablishedConnection() { setup ⇒
+      import setup._
+
+      serverSideChannel.setOption(StandardSocketOptions.SO_LINGER, 0: Integer)
+      serverSideChannel.close()
+
+      connectionActor.tell(Write(ByteString("testdata")), connectionHandler.ref)
+      //connectionActor.tell(ChannelReadable, selector.ref)
+      connectionHandler.expectMsgPF(remaining) {
+        case ErrorClose(exc: IOException) if exc.getMessage == "Connection reset by peer" ⇒
+      }
+      connectionActor.isTerminated must be(true)
     }
 
     // error conditions
     "time out when user level Connected isn't answered with Register" in {
-
       pending
     }
     "report a connection error back to the user when the connection attempt fails" in {
+      pending
+    }
+    "close the actor on IOExceptions during normal operation" in {
       pending
     }
   }
@@ -194,7 +281,26 @@ class TcpConnectionSpec extends AkkaSpec with ImplicitSender {
     selector: TestProbe,
     connectionActor: TestActorRef[TcpOutgoingConnection],
     clientSideChannel: SocketChannel,
-    serverSideChannel: SocketChannel)
+    serverSideChannel: SocketChannel) {
+
+    val buffer = ByteBuffer.allocate(TestSize)
+    @tailrec final def pullFromServerSide(remaining: Int): Unit =
+      if (remaining > 0) {
+        if (selector.msgAvailable) {
+          selector.expectMsg(WriteInterest)
+          connectionActor.tell(ChannelWritable, selector.ref)
+        }
+
+        buffer.clear()
+        val read = serverSideChannel.read(buffer)
+        if (read == 0)
+          throw new IllegalStateException("Didn't make any progress")
+        else if (read == -1)
+          throw new IllegalStateException("Connection was closed unexpectedly with remaining bytes " + remaining)
+
+        pullFromServerSide(remaining - read)
+      }
+  }
   def withEstablishedConnection(setServerSocketOptions: ServerSocketChannel ⇒ Unit = _ ⇒ ())(body: Setup ⇒ Any): Unit = withLocalServer(setServerSocketOptions) { localServer ⇒
     val userHandler = TestProbe()
     val connectionHandler = TestProbe()
@@ -230,4 +336,11 @@ class TcpConnectionSpec extends AkkaSpec with ImplicitSender {
         serverSideChannel)
     }
   }
+
+  val TestSize = 10000
+  def writeCmd(ack: AnyRef, nack: AnyRef) =
+    Write(ByteString(Array.fill[Byte](TestSize)(0)), ack, nack)
+
+  def setSmallRcvBuffer(channel: ServerSocketChannel) =
+    channel.setOption(StandardSocketOptions.SO_RCVBUF, 1024: Integer)
 }

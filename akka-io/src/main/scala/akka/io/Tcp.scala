@@ -66,11 +66,13 @@ object Tcp {
   case class Received(data: ByteString) extends Event
   case class Connected(localAddress: InetSocketAddress, remoteAddress: InetSocketAddress) extends Event
 
-  sealed trait Closed extends Event
-  case object PeerClosed extends Closed
-  case object ActivelyClosed extends Closed
-  case object ConfirmedClosed extends Closed
-  case class Error(cause: Throwable) extends Closed
+  sealed trait ConnectionClosed extends Event
+  case object Closed extends ConnectionClosed
+  case object Aborted extends ConnectionClosed
+  case object ConfirmedClosed extends ConnectionClosed
+
+  case object PeerClosed extends ConnectionClosed
+  case class ErrorClose(cause: Throwable) extends ConnectionClosed
 
   /// INTERNAL
   case class RegisterClientChannel(channel: SocketChannel)
