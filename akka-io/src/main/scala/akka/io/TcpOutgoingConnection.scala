@@ -21,7 +21,7 @@ class TcpOutgoingConnection(val selector: ActorRef,
   with TcpBaseConnection {
   val channel = openChannel()
 
-  context.watch(commander)
+  context.watch(commander) // sign death pact
 
   localAddress.foreach(channel.socket.bind)
   options.foreach(_.beforeConnect(channel.socket))
@@ -47,8 +47,6 @@ class TcpOutgoingConnection(val selector: ActorRef,
       } catch {
         case e: IOException ⇒ handleError(commander, e)
       }
-
-    case Terminated(`commander`) ⇒ context.stop(self)
   }
 
   def openChannel(): SocketChannel = {

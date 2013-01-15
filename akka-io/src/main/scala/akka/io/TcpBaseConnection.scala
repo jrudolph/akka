@@ -33,14 +33,13 @@ trait TcpBaseConnection extends WithDirectBuffer { _: Actor with ActorLogging �
       selector ! ReadInterest
 
       context.setReceiveTimeout(Duration.Undefined)
-      context.watch(handler)
+      context.watch(handler) // sign death pact
 
       context.become(connected(handler))
 
-    case cmd: CloseCommand                       ⇒ handleClose(commander, closeResponse(cmd))
+    case cmd: CloseCommand ⇒ handleClose(commander, closeResponse(cmd))
 
-    case ReceiveTimeout                          ⇒ context.stop(self)
-    case Terminated(actor) if actor == commander ⇒ context.stop(self)
+    case ReceiveTimeout    ⇒ context.stop(self)
   }
 
   /** normal connected state */
@@ -53,12 +52,10 @@ trait TcpBaseConnection extends WithDirectBuffer { _: Actor with ActorLogging �
       log.debug("Dropping write because queue is already full")
 
       handler ! CommandFailed(write)
-    case write: Write                          ⇒ doWrite(handler, write)
-    case ChannelWritable                       ⇒ doWrite(handler, remainingWrite)
+    case write: Write      ⇒ doWrite(handler, write)
+    case ChannelWritable   ⇒ doWrite(handler, remainingWrite)
 
-    case cmd: CloseCommand                     ⇒ handleClose(handler, closeResponse(cmd))
-
-    case Terminated(actor) if actor == handler ⇒ context.stop(self)
+    case cmd: CloseCommand ⇒ handleClose(handler, closeResponse(cmd))
   }
 
   /** connection is closing but a write has to be finished first */
@@ -71,17 +68,13 @@ trait TcpBaseConnection extends WithDirectBuffer { _: Actor with ActorLogging �
       if (!currentlyWriting) // write is now finished
         handleClose(handler, closedEvent)
 
-    case Abort                                 ⇒ handleClose(handler, Aborted)
-
-    case Terminated(actor) if actor == handler ⇒ context.stop(self)
+    case Abort ⇒ handleClose(handler, Aborted)
   }
 
   /** connection is closed on our side and we're waiting from confirmation from the other side */
   def closing(handler: ActorRef): Receive = {
-    case ChannelReadable                       ⇒ doRead(handler)
-    case Abort                                 ⇒ handleClose(handler, Aborted)
-
-    case Terminated(actor) if actor == handler ⇒ context.stop(self)
+    case ChannelReadable ⇒ doRead(handler)
+    case Abort           ⇒ handleClose(handler, Aborted)
   }
 
   // AUXILIARIES and IMPLEMENTATION

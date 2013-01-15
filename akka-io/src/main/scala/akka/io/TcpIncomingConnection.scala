@@ -20,7 +20,7 @@ class TcpIncomingConnection(val selector: ActorRef,
   with ActorLogging
   with TcpBaseConnection {
 
-  context.watch(commander)
+  context.watch(commander) // sign death pact
 
   channel.configureBlocking(false)
   completeConnect(commander, options)
