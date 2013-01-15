@@ -1,6 +1,6 @@
 package akka.io
 
-import java.net.{ StandardSocketOptions, InetSocketAddress }
+import java.net.InetSocketAddress
 import java.io.IOException
 import java.nio.channels.SocketChannel
 
@@ -91,8 +91,8 @@ trait TcpBaseConnection extends WithDirectBuffer { _: Actor with ActorLogging â‡
     options.foreach(_.afterConnect(channel.socket))
 
     commander ! Connected(
-      channel.getLocalAddress.asInstanceOf[InetSocketAddress],
-      channel.getRemoteAddress.asInstanceOf[InetSocketAddress])
+      channel.socket.getLocalSocketAddress.asInstanceOf[InetSocketAddress],
+      channel.socket.getRemoteSocketAddress.asInstanceOf[InetSocketAddress])
 
     context.setReceiveTimeout(Tcp(context.system).Settings.RegisterTimeout)
 
@@ -213,7 +213,7 @@ trait TcpBaseConnection extends WithDirectBuffer { _: Actor with ActorLogging â‡
   }
 
   def abort(): Unit = {
-    channel.setOption(StandardSocketOptions.SO_LINGER, 0: Integer)
+    channel.socket.setSoLinger(true, 0)
     channel.close()
   }
 
