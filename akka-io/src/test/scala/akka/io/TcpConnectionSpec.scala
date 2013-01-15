@@ -154,14 +154,14 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") wi
         connectionHandler.send(connectionActor, firstWrite)
         selector.expectMsg(WriteInterest)
 
-        // send another write which should fail the immediately
+        // send another write which should fail immediately
         // because we don't store more than one piece in flight
         val secondWrite = writeCmd(Ack2)
         connectionHandler.send(connectionActor, secondWrite)
         connectionHandler.expectMsg(CommandFailed(secondWrite))
 
-        // there will be immediately more space in the SND_BUF because
-        // some data will have been send now, so we assume we can write
+        // there will be immediately more space in the send buffer because
+        // some data will have been sent by now, so we assume we can write
         // again, but still it can't write everything
         selector.send(connectionActor, ChannelWritable)
 
@@ -186,11 +186,6 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") wi
     "close the connection" in withEstablishedConnection(setSmallRcvBuffer) { setup ⇒
       import setup._
 
-      /*println("Port: " + clientSideChannel.getLocalAddress)
-      val sel = SelectorProvider.provider().openSelector()
-      serverSideChannel.configureBlocking(false)
-      serverSideChannel.register(sel, SelectionKey.OP_READ)*/
-
       // we should test here that a pending write command is properly finished first
       object Ack
       // set an artificially small send buffer size so that the write is queued
@@ -206,7 +201,6 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") wi
       connectionHandler.expectMsg(Closed)
       connectionActor.isTerminated must be(true)
 
-      //val res = sel.select()
       val buffer = ByteBuffer.allocate(1)
       serverSideChannel.read(buffer) must be(-1)
     }
@@ -336,7 +330,7 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") wi
         case ErrorClose(e) ⇒ e.getMessage must be("Connection refused")
       }
     }
-    "time out when user level Connected isn't answered with Register" in withLocalServer() { localServer ⇒
+    "time out when Connected isn't answered with Register" in withLocalServer() { localServer ⇒
       val userHandler = TestProbe()
       val selector = TestProbe()
 

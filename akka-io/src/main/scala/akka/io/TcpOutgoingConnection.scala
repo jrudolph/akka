@@ -32,7 +32,6 @@ class TcpOutgoingConnection(val selector: ActorRef,
     context.become(connecting)
   }
 
-  // fixme: do we do it like this?
   def receive: Receive = PartialFunction.empty
 
   def connecting: Receive = {
