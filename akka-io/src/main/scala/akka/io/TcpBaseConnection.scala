@@ -44,7 +44,7 @@ trait TcpBaseConnection { _: Actor ⇒
     case ResumeReading                         ⇒ selector ! ReadInterest
     case ChannelReadable                       ⇒ doRead(handler)
 
-    case write: Write if currentlyWriting      ⇒ handler ! NAck(write)
+    case write: Write if currentlyWriting      ⇒ handler ! CommandFailed(write)
     case write: Write                          ⇒ doWrite(handler, write)
     case ChannelWritable                       ⇒ doWrite(handler, remainingWrite)
 

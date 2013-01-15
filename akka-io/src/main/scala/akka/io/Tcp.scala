@@ -162,16 +162,12 @@ object Tcp extends ExtensionKey[TcpExt] {
       def isEmpty: Boolean = _data.isEmpty
 
       def ack: AnyRef = _ack
-      def nack: AnyRef = null
 
       /** Returns a new write with `numBytes` removed from the front */
       def consume(numBytes: Int): Write =
         if (numBytes == 0) this
         else if (numBytes == _data.length) empty
         else apply(_data.drop(numBytes), _ack)
-
-      def consumeNack: Write =
-        this
     }
   }
 
@@ -185,8 +181,6 @@ object Tcp extends ExtensionKey[TcpExt] {
       else throw new IllegalStateException("Can't consumed bytes from an EmptyWrite")
 
     def ack: AnyRef = throw new UnsupportedOperationException("Shouldn't be called on EmptyWrite")
-    def nack: AnyRef = throw new UnsupportedOperationException("Shouldn't be called on EmptyWrite")
-    def consumeNack: Write = throw new UnsupportedOperationException("Shouldn't be called on EmptyWrite")
   }
 
   case object StopReading extends Command
@@ -198,7 +192,6 @@ object Tcp extends ExtensionKey[TcpExt] {
   case object Bound extends Event
   case class Connected(localAddress: InetSocketAddress, remoteAddress: InetSocketAddress) extends Event
   case class Received(data: ByteString) extends Event
-  case class NAck(write: Write) extends Event
   case class CommandFailed(cmd: Command) extends Event
 
   sealed trait ConnectionClosed extends Event

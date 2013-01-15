@@ -121,11 +121,11 @@ class TcpConnectionSpec extends AkkaSpec with ImplicitSender {
         connectionHandler.send(connectionActor, firstWrite)
         selector.expectMsg(WriteInterest)
 
-        // send another write which should nack immediately
+        // send another write which should fail the immediately
         // because we don't store more than one piece in flight
         val secondWrite = writeCmd(Ack2)
         connectionHandler.send(connectionActor, secondWrite)
-        connectionHandler.expectMsg(NAck(secondWrite))
+        connectionHandler.expectMsg(CommandFailed(secondWrite))
 
         // there will be immediately more space in the SND_BUF because
         // some data will have been send now, so we assume we can write
