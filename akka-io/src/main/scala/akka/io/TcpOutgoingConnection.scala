@@ -23,7 +23,7 @@ class TcpOutgoingConnection(val selector: ActorRef,
 
   context.watch(commander)
 
-  localAddress.foreach(channel.bind)
+  localAddress.foreach(channel.socket.bind)
   options.foreach(_.beforeConnect(channel.socket))
 
   log.debug("Attempting connection to {}", remoteAddress)
