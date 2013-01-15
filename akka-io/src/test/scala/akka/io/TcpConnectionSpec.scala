@@ -13,7 +13,7 @@ import java.nio.channels.spi.SelectorProvider
 import java.io.IOException
 import akka.actor.{ Props, Actor, Terminated }
 
-class TcpConnectionSpec extends AkkaSpec with ImplicitSender {
+class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") with ImplicitSender {
   val port = 45679
   val localhost = InetAddress.getLocalHost
   val serverAddress = new InetSocketAddress(localhost, port)
@@ -359,7 +359,7 @@ class TcpConnectionSpec extends AkkaSpec with ImplicitSender {
 
       userHandler.expectMsg(Connected(clientSideChannel.getLocalAddress.asInstanceOf[InetSocketAddress], serverAddress))
 
-      watcher.expectMsgPF(3.seconds) {
+      watcher.expectMsgPF(1500.millis) {
         case Terminated(`connectionActor`) ⇒
       }
       clientSideChannel.isOpen must be(false)

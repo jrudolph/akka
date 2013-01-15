@@ -89,8 +89,7 @@ trait TcpBaseConnection extends WithDirectBuffer { _: Actor ⇒
       channel.getLocalAddress.asInstanceOf[InetSocketAddress],
       channel.getRemoteAddress.asInstanceOf[InetSocketAddress])
 
-    // FIXME: make configurable
-    context.setReceiveTimeout(2.seconds)
+    context.setReceiveTimeout(Tcp(context.system).Settings.RegisterTimeout)
 
     context.become(waitingForRegistration)
   }

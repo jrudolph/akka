@@ -236,6 +236,9 @@ class TcpExt(system: ExtendedActorSystem) extends IO.Extension {
     val WorkerDispatcher = getString("worker-dispatcher")
     val ManagementDispatcher = getString("management-dispatcher")
     val DirectBufferSize = getInt("direct-buffer-size")
+    val RegisterTimeout =
+      if (getString("register-timeout") == "infinite") Duration.Undefined
+      else Duration(getMilliseconds("register-timeout"), MILLISECONDS)
   }
 
   val manager = system.asInstanceOf[ActorSystemImpl].systemActorOf(
