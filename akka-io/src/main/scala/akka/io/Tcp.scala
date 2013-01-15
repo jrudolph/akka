@@ -236,6 +236,7 @@ class TcpExt(system: ExtendedActorSystem) extends IO.Extension {
     val SelectorDispatcher = getString("selector-dispatcher")
     val WorkerDispatcher = getString("worker-dispatcher")
     val ManagementDispatcher = getString("management-dispatcher")
+    val DirectBufferSize = getInt("direct-buffer-size")
   }
 
   val manager = system.asInstanceOf[ActorSystemImpl].systemActorOf(

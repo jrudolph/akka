@@ -11,7 +11,7 @@ import java.io.IOException
 /**
  * The base for TcpIncomingConnection and TcpOutgoingCOnnection.
  */
-trait TcpBaseConnection { _: Actor ⇒
+trait TcpBaseConnection extends WithDirectBuffer { _: Actor ⇒
   def channel: SocketChannel
   def selector: ActorRef
   def commander: ActorRef
@@ -91,7 +91,7 @@ trait TcpBaseConnection { _: Actor ⇒
   }
 
   def doRead(handler: ActorRef): Unit = {
-    val buffer = DirectBufferPool.get()
+    val buffer = getDirectBuffer()
 
     try {
       val read = channel.read(buffer)
@@ -116,7 +116,7 @@ trait TcpBaseConnection { _: Actor ⇒
     // data should be written on the network
     val data = write.data
 
-    val buffer = DirectBufferPool.get()
+    val buffer = getDirectBuffer()
     data.copyToBuffer(buffer)
     buffer.flip()
 
