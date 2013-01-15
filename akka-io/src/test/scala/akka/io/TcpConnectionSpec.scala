@@ -2,9 +2,9 @@ package akka.io
 
 import scala.annotation.tailrec
 
-import akka.testkit.{ TestProbe, ImplicitSender, TestActorRef, AkkaSpec }
+import akka.testkit.{ TestProbe, TestActorRef, AkkaSpec }
 import java.net._
-import java.nio.channels.{ SelectionKey, Selector, SocketChannel, ServerSocketChannel }
+import java.nio.channels.{ SelectionKey, SocketChannel, ServerSocketChannel }
 import akka.io.Tcp._
 import java.nio.ByteBuffer
 import akka.util.ByteString
@@ -13,7 +13,7 @@ import java.nio.channels.spi.SelectorProvider
 import java.io.IOException
 import akka.actor.{ Props, Actor, Terminated }
 
-class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") with ImplicitSender {
+class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") {
   val port = 45679
   val localhost = InetAddress.getLocalHost
   val serverAddress = new InetSocketAddress(localhost, port)
@@ -230,6 +230,7 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") wi
       connectionHandler.send(connectionActor, writeCmd(Ack))
       connectionHandler.send(connectionActor, ConfirmedClose)
 
+      connectionHandler.expectNoMsg(100.millis)
       setup.pullFromServerSide(TestSize)
       connectionHandler.expectMsg(Ack)
 
@@ -262,7 +263,7 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") wi
 
       selector.send(connectionActor, ChannelReadable)
       connectionHandler.expectMsgPF(remaining) {
-        case ErrorClose(exc: IOException) if exc.getMessage == "Connection reset by peer" ⇒
+        case ErrorClose(exc: IOException) ⇒ exc.getMessage must be("Connection reset by peer")
       }
       connectionActor.isTerminated must be(true)
     }
