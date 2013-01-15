@@ -12,6 +12,8 @@ class TcpIncomingConnection(val selector: ActorRef,
                             val commander: ActorRef,
                             val channel: SocketChannel) extends Actor with TcpBaseConnection {
   context.watch(commander)
+
+  channel.configureBlocking(false)
   completeConnect()
 
   def receive = PartialFunction.empty
