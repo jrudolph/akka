@@ -15,7 +15,7 @@ import Tcp._
 /**
  * The base for TcpIncomingConnection and TcpOutgoingConnection.
  */
-trait TcpBaseConnection extends WithDirectBuffer { _: Actor with ActorLogging ⇒
+trait TcpBaseConnection extends Actor with WithDirectBuffer { _: Actor with ActorLogging ⇒
   def channel: SocketChannel
   def selector: ActorRef
 
@@ -197,12 +197,10 @@ trait TcpBaseConnection extends WithDirectBuffer { _: Actor with ActorLogging �
   }
 
   def handleError(handler: ActorRef, exception: IOException) {
+    exception.setStackTrace(Array.empty)
     handler ! ErrorClose(exception)
 
-    if (channel.isOpen)
-      abort()
-
-    context.stop(self)
+    throw exception
   }
 
   def abort(): Unit = {

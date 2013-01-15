@@ -251,6 +251,10 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") {
       connectionHandler.expectMsgPF(remaining) {
         case ErrorClose(exc: IOException) ⇒ exc.getMessage must be("Connection reset by peer")
       }
+      // wait a while
+      connectionHandler.expectNoMsg(200.millis)
+
+      clientSideChannel.isOpen must be(false)
       connectionActor.isTerminated must be(true)
     }
     "peer closed the connection when trying to write" in withEstablishedConnection() { setup ⇒
@@ -264,6 +268,7 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") {
       connectionHandler.expectMsgPF(remaining) {
         case ErrorClose(exc: IOException) ⇒ exc.getMessage must be("Connection reset by peer")
       }
+      clientSideChannel.isOpen must be(false)
       connectionActor.isTerminated must be(true)
     }
 
@@ -451,6 +456,7 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") {
         serverAddress,
         localAddress,
         options) {
+
         override def postRestart(reason: Throwable) {
           context.stop(self)
         }
