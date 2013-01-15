@@ -162,7 +162,6 @@ object Tcp extends ExtensionKey[TcpExt] {
 
       def ack: AnyRef = _ack
 
-      /** Returns a new write with `numBytes` removed from the front */
       def consume(numBytes: Int): Write =
         if (numBytes == 0) this
         else if (numBytes == _data.length) empty
@@ -171,13 +170,13 @@ object Tcp extends ExtensionKey[TcpExt] {
   }
 
   /** The EmptyWrite, we use this in TcpBaseConnection as a marker for the empty write queue */
-  object EmptyWrite extends Write {
+  private[io] object EmptyWrite extends Write {
     def data: ByteString = ByteString.empty
     def isEmpty: Boolean = true
 
     def consume(numBytes: Int): Write =
       if (numBytes == 0) this
-      else throw new IllegalStateException("Can't consumed bytes from an EmptyWrite")
+      else throw new IllegalStateException("Can't consume bytes from an EmptyWrite")
 
     def ack: AnyRef = throw new UnsupportedOperationException("Shouldn't be called on EmptyWrite")
   }
