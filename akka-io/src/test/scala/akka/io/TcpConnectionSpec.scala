@@ -11,7 +11,8 @@ import akka.util.ByteString
 import scala.concurrent.duration._
 import java.nio.channels.spi.SelectorProvider
 import java.io.IOException
-import akka.actor.{ Props, Actor, Terminated }
+import akka.actor.{ ActorRef, Props, Actor, Terminated }
+import collection.immutable
 
 class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") {
   val port = 45679
@@ -28,13 +29,8 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") {
       val connectionHandler = TestProbe()
       val selector = TestProbe()
 
-      val conn = TestActorRef(
-        new TcpOutgoingConnection(
-          selector.ref,
-          userHandler.ref,
-          serverAddress,
-          None,
-          Nil))
+      val conn = createConnectionActor(selector.ref, userHandler.ref)
+
       val clientChannel = conn.underlyingActor.channel
 
       // registered for interested
@@ -68,13 +64,8 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") {
       val userHandler = TestProbe()
       val selector = TestProbe()
 
-      val connectionActor = TestActorRef(
-        new TcpOutgoingConnection(
-          selector.ref,
-          userHandler.ref,
-          serverAddress,
-          None,
-          Vector(SO.ReuseAddress(true))))
+      val connectionActor =
+        createConnectionActor(selector.ref, userHandler.ref, options = Vector(SO.ReuseAddress(true)))
 
       val clientChannel = connectionActor.underlyingActor.channel
       clientChannel.getOption(StandardSocketOptions.SO_REUSEADDR).booleanValue() must be(true)
@@ -83,13 +74,8 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") {
       val userHandler = TestProbe()
       val selector = TestProbe()
 
-      val connectionActor = TestActorRef(
-        new TcpOutgoingConnection(
-          selector.ref,
-          userHandler.ref,
-          serverAddress,
-          None,
-          Vector(SO.KeepAlive(true))))
+      val connectionActor =
+        createConnectionActor(selector.ref, userHandler.ref, options = Vector(SO.KeepAlive(true)))
 
       val clientChannel = connectionActor.underlyingActor.channel
       clientChannel.getOption(StandardSocketOptions.SO_KEEPALIVE).booleanValue() must be(false) // only set after connection is established
@@ -286,13 +272,7 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") {
       val userHandler = TestProbe()
       val selector = TestProbe()
 
-      val connectionActor = TestActorRef(
-        new TcpOutgoingConnection(
-          selector.ref,
-          userHandler.ref,
-          serverAddress,
-          None,
-          Nil))
+      val connectionActor = createConnectionActor(selector.ref, userHandler.ref)
 
       val clientSideChannel = connectionActor.underlyingActor.channel
       selector.expectMsg(RegisterClientChannel(clientSideChannel))
@@ -309,13 +289,7 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") {
       val userHandler = TestProbe()
       val selector = TestProbe()
 
-      val connectionActor = TestActorRef(
-        new TcpOutgoingConnection(
-          selector.ref,
-          userHandler.ref,
-          new InetSocketAddress("127.0.0.38", 4242), // some likely unknown address
-          None,
-          Nil))
+      val connectionActor = createConnectionActor(selector.ref, userHandler.ref, serverAddress = new InetSocketAddress("127.0.0.38", 4242))
 
       val clientSideChannel = connectionActor.underlyingActor.channel
       selector.expectMsg(RegisterClientChannel(clientSideChannel))
@@ -335,13 +309,7 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") {
       val userHandler = TestProbe()
       val selector = TestProbe()
 
-      val connectionActor = TestActorRef(
-        new TcpOutgoingConnection(
-          selector.ref,
-          userHandler.ref,
-          serverAddress,
-          None,
-          Nil))
+      val connectionActor = createConnectionActor(selector.ref, userHandler.ref)
 
       val watcher = TestProbe()
       watcher.watch(connectionActor)
@@ -365,13 +333,7 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") {
       }))
       val selector = TestProbe()
 
-      val connectionActor = TestActorRef(
-        new TcpOutgoingConnection(
-          selector.ref,
-          userHandler,
-          serverAddress,
-          None,
-          Nil))
+      val connectionActor = createConnectionActor(selector.ref, userHandler)
 
       val watcher = TestProbe()
       watcher.watch(connectionActor)
@@ -442,13 +404,7 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") {
     val connectionHandler = TestProbe()
     val selector = TestProbe()
 
-    val connectionActor = TestActorRef(
-      new TcpOutgoingConnection(
-        selector.ref,
-        userHandler.ref,
-        serverAddress,
-        None,
-        Nil))
+    val connectionActor = createConnectionActor(selector.ref, userHandler.ref)
 
     val clientSideChannel = connectionActor.underlyingActor.channel
 
@@ -480,4 +436,24 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") {
 
   def setSmallRcvBuffer(channel: ServerSocketChannel) =
     channel.setOption(StandardSocketOptions.SO_RCVBUF, 1024: Integer)
+
+  def createConnectionActor(
+    selector: ActorRef,
+    commander: ActorRef,
+    serverAddress: InetSocketAddress = serverAddress,
+    localAddress: Option[InetSocketAddress] = None,
+    options: immutable.Seq[Tcp.SocketOption] = Nil): TestActorRef[TcpOutgoingConnection] = {
+
+    TestActorRef(
+      new TcpOutgoingConnection(
+        selector,
+        commander,
+        serverAddress,
+        localAddress,
+        options) {
+        override def postRestart(reason: Throwable) {
+          context.stop(self)
+        }
+      })
+  }
 }
