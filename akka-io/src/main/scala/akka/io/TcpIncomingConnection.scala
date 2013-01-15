@@ -9,9 +9,9 @@ import collection.immutable.Queue
  * SocketChannel.
  */
 class TcpIncomingConnection(val selector: ActorRef,
-                            val handler: ActorRef,
+                            val commander: ActorRef,
                             val channel: SocketChannel) extends Actor with TcpBaseConnection {
-  context.watch(handler)
+  context.watch(commander)
   completeConnect()
 
   def receive = PartialFunction.empty

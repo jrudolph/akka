@@ -14,7 +14,7 @@ import java.io.IOException
 trait TcpBaseConnection { _: Actor ⇒
   def channel: SocketChannel
   def selector: ActorRef
-  def handler: ActorRef
+  def commander: ActorRef
 
   /** a write queue of size 1 to contain one unfinished write command */
   var remainingWrite: Write = EmptyWrite
@@ -32,10 +32,10 @@ trait TcpBaseConnection { _: Actor ⇒
 
       context.become(connected(handler))
 
-    case cmd: CloseCommand                     ⇒ handleClose(handler, closeResponse(cmd))
+    case cmd: CloseCommand                       ⇒ handleClose(commander, closeResponse(cmd))
 
-    case ReceiveTimeout                        ⇒ context.stop(self)
-    case Terminated(actor) if actor == handler ⇒ context.stop(self)
+    case ReceiveTimeout                          ⇒ context.stop(self)
+    case Terminated(actor) if actor == commander ⇒ context.stop(self)
   }
 
   /** normal connected state */
@@ -80,7 +80,7 @@ trait TcpBaseConnection { _: Actor ⇒
 
   /** use in subclasses to start the common machinery above once a channel is connected */
   def completeConnect(): Unit = {
-    handler ! Connected(
+    commander ! Connected(
       channel.getLocalAddress.asInstanceOf[InetSocketAddress],
       channel.getRemoteAddress.asInstanceOf[InetSocketAddress])
 

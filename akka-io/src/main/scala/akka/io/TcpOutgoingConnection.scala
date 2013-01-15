@@ -12,12 +12,12 @@ import java.io.IOException
  * to be established.
  */
 class TcpOutgoingConnection(val selector: ActorRef,
-                            val handler: ActorRef,
+                            val commander: ActorRef,
                             remoteAddress: InetSocketAddress,
                             localAddress: Option[InetSocketAddress]) extends Actor with TcpBaseConnection {
   val channel = openChannel()
 
-  context.watch(handler)
+  context.watch(commander)
 
   localAddress.foreach(channel.bind)
 
@@ -40,10 +40,10 @@ class TcpOutgoingConnection(val selector: ActorRef,
         assert(connected, "Connectable channel failed to connect")
         completeConnect()
       } catch {
-        case e: IOException ⇒ handleError(handler, e)
+        case e: IOException ⇒ handleError(commander, e)
       }
 
-    case Terminated(`handler`) ⇒ context.stop(self)
+    case Terminated(`commander`) ⇒ context.stop(self)
   }
 
   def openChannel(): SocketChannel = {
