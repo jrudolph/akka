@@ -29,6 +29,8 @@ trait TcpBaseConnection { self: Actor ⇒
       selector ! ReadInterest
 
       context.become(connected(handler))
+
+    case cmd: CloseCommand ⇒ handleClose(handler, closeResponse(cmd))
   }
 
   /** normal connected state */
@@ -58,11 +60,14 @@ trait TcpBaseConnection { self: Actor ⇒
 
       if (!currentlyWriting) // write is now finished
         handleClose(handler, closedEvent)
+
+    case Abort ⇒ handleClose(handler, Aborted)
   }
 
   /** connection is closed on our side and we're waiting from confirmation from the other side */
   def closing(handler: ActorRef): Receive = {
     case ChannelReadable ⇒ doRead(handler)
+    case Abort           ⇒ handleClose(handler, Aborted)
   }
 
   // AUXILIARIES and IMPLEMENTATION
