@@ -23,8 +23,7 @@ class TcpOutgoingConnection(val selector: ActorRef,
   localAddress.foreach(channel.bind)
   options.foreach(_.beforeConnect(channel.socket))
 
-  val connected = channel.connect(remoteAddress)
-  if (connected)
+  if (channel.connect(remoteAddress))
     completeConnect()
   else {
     selector ! RegisterClientChannel(channel)
