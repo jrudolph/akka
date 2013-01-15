@@ -33,7 +33,8 @@ class TcpConnectionSpec extends AkkaSpec with ImplicitSender {
           selector.ref,
           userHandler.ref,
           serverAddress,
-          None))
+          None,
+          Nil))
       val clientChannel = conn.underlyingActor.channel
 
       // registered for interested
@@ -62,6 +63,38 @@ class TcpConnectionSpec extends AkkaSpec with ImplicitSender {
       userHandler.send(conn, Register(connectionHandler.ref))
 
       selector.expectMsg(ReadInterest)
+    }
+    "set socket options before connecting" in withLocalServer() { localServer ⇒
+      val userHandler = TestProbe()
+      val selector = TestProbe()
+
+      val connectionActor = TestActorRef(
+        new TcpOutgoingConnection(
+          selector.ref,
+          userHandler.ref,
+          serverAddress,
+          None,
+          Vector(SO.ReuseAddress(true))))
+
+      val clientChannel = connectionActor.underlyingActor.channel
+      clientChannel.getOption(StandardSocketOptions.SO_REUSEADDR).booleanValue() must be(true)
+    }
+    "set socket options after connecting" in withLocalServer() { localServer ⇒
+      val userHandler = TestProbe()
+      val selector = TestProbe()
+
+      val connectionActor = TestActorRef(
+        new TcpOutgoingConnection(
+          selector.ref,
+          userHandler.ref,
+          serverAddress,
+          None,
+          Vector(SO.KeepAlive(true))))
+
+      val clientChannel = connectionActor.underlyingActor.channel
+      clientChannel.getOption(StandardSocketOptions.SO_KEEPALIVE).booleanValue() must be(false) // only set after connection is established
+      selector.send(connectionActor, ChannelConnectable)
+      clientChannel.getOption(StandardSocketOptions.SO_KEEPALIVE).booleanValue() must be(true)
     }
 
     "send incoming data to user" in withEstablishedConnection() { setup ⇒
@@ -263,7 +296,8 @@ class TcpConnectionSpec extends AkkaSpec with ImplicitSender {
           selector.ref,
           userHandler.ref,
           serverAddress,
-          None))
+          None,
+          Nil))
 
       val clientSideChannel = connectionActor.underlyingActor.channel
       selector.expectMsg(RegisterClientChannel(clientSideChannel))
@@ -285,7 +319,8 @@ class TcpConnectionSpec extends AkkaSpec with ImplicitSender {
           selector.ref,
           userHandler.ref,
           new InetSocketAddress("127.0.0.38", 4242), // some likely unknown address
-          None))
+          None,
+          Nil))
 
       val clientSideChannel = connectionActor.underlyingActor.channel
       selector.expectMsg(RegisterClientChannel(clientSideChannel))
@@ -310,7 +345,8 @@ class TcpConnectionSpec extends AkkaSpec with ImplicitSender {
           selector.ref,
           userHandler.ref,
           serverAddress,
-          None))
+          None,
+          Nil))
 
       val watcher = TestProbe()
       watcher.watch(connectionActor)
@@ -339,7 +375,8 @@ class TcpConnectionSpec extends AkkaSpec with ImplicitSender {
           selector.ref,
           userHandler,
           serverAddress,
-          None))
+          None,
+          Nil))
 
       val watcher = TestProbe()
       watcher.watch(connectionActor)
@@ -415,7 +452,8 @@ class TcpConnectionSpec extends AkkaSpec with ImplicitSender {
         selector.ref,
         userHandler.ref,
         serverAddress,
-        None))
+        None,
+        Nil))
 
     val clientSideChannel = connectionActor.underlyingActor.channel
 

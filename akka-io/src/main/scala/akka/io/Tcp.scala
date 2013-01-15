@@ -31,31 +31,30 @@ object Tcp extends ExtensionKey[TcpExt] {
   case class Bind(handler: ActorRef,
                   address: InetSocketAddress,
                   backlog: Int = 100,
-                  options: immutable.Seq[SO.SocketOption] = Nil) extends Command
+                  options: immutable.Seq[SocketOption] = Nil) extends Command
   case object Unbind extends Command
   case class Register(handler: ActorRef) extends Command
 
-  object SO {
+  /**
+   * SocketOption is a package of data (from the user) and associated
+   * behavior (how to apply that to a socket).
+   */
+  sealed trait SocketOption {
     /**
-     * SocketOption is a package of data (from the user) and associated
-     * behavior (how to apply that to a socket).
+     * Action to be taken for this option before calling bind()
      */
-    sealed trait SocketOption {
-      /**
-       * Action to be taken for this option before calling bind()
-       */
-      def beforeBind(s: ServerSocket): Unit = ()
-      /**
-       * Action to be taken for this option before calling connect()
-       */
-      def beforeConnect(s: Socket): Unit = ()
-      /**
-       * Action to be taken for this option after connect returned (i.e. on
-       * the slave socket for servers).
-       */
-      def afterConnect(s: Socket): Unit = ()
-    }
-
+    def beforeBind(s: ServerSocket): Unit = ()
+    /**
+     * Action to be taken for this option before calling connect()
+     */
+    def beforeConnect(s: Socket): Unit = ()
+    /**
+     * Action to be taken for this option after connect returned (i.e. on
+     * the slave socket for servers).
+     */
+    def afterConnect(s: Socket): Unit = ()
+  }
+  object SO {
     // shared socket options
 
     /**

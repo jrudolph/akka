@@ -1,8 +1,12 @@
 package akka.io
 
-import akka.actor.{ Actor, ActorRef }
+import collection.immutable
+
 import java.nio.channels.SocketChannel
-import collection.immutable.Queue
+
+import akka.actor.{ Actor, ActorRef }
+
+import Tcp.SocketOption
 
 /**
  * An actor handling the connection state machine for an incoming, already connected
@@ -10,7 +14,8 @@ import collection.immutable.Queue
  */
 class TcpIncomingConnection(val selector: ActorRef,
                             val commander: ActorRef,
-                            val channel: SocketChannel) extends Actor with TcpBaseConnection {
+                            val channel: SocketChannel,
+                            val options: immutable.Seq[SocketOption]) extends Actor with TcpBaseConnection {
   context.watch(commander)
 
   channel.configureBlocking(false)

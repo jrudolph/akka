@@ -1,5 +1,7 @@
 package akka.io
 
+import collection.immutable
+
 import akka.actor.{ ReceiveTimeout, Terminated, ActorRef, Actor }
 import scala.concurrent.duration._
 import java.nio.channels.SocketChannel
@@ -9,12 +11,13 @@ import java.net.{ StandardSocketOptions, InetSocketAddress }
 import java.io.IOException
 
 /**
- * The base for TcpIncomingConnection and TcpOutgoingCOnnection.
+ * The base for TcpIncomingConnection and TcpOutgoingConnection.
  */
 trait TcpBaseConnection extends WithDirectBuffer { _: Actor ⇒
   def channel: SocketChannel
   def selector: ActorRef
   def commander: ActorRef
+  def options: immutable.Seq[SocketOption]
 
   /** a write queue of size 1 to contain one unfinished write command */
   var remainingWrite: Write = EmptyWrite
@@ -80,6 +83,8 @@ trait TcpBaseConnection extends WithDirectBuffer { _: Actor ⇒
 
   /** use in subclasses to start the common machinery above once a channel is connected */
   def completeConnect(): Unit = {
+    options.foreach(_.afterConnect(channel.socket))
+
     commander ! Connected(
       channel.getLocalAddress.asInstanceOf[InetSocketAddress],
       channel.getRemoteAddress.asInstanceOf[InetSocketAddress])
