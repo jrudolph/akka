@@ -4,9 +4,11 @@ import akka.actor.{ ActorRef, Actor }
 import java.net.InetSocketAddress
 import java.nio.channels.SocketChannel
 import collection.immutable.Queue
+import akka.io.Tcp.{ RegisterClientChannel, ChannelConnectable }
 
 /**
- * Manages one client connection
+ * An actor handling the connection state machine for an outgoing connection
+ * to be established.
  */
 class TcpOutgoingConnection(val selector: ActorRef,
                             val handler: ActorRef,
@@ -21,7 +23,7 @@ class TcpOutgoingConnection(val selector: ActorRef,
     if (connected)
       completeConnect()
     else {
-      selector ! Tcp.RegisterClientChannel(channel)
+      selector ! RegisterClientChannel(channel)
 
       context.become(connecting)
     }
@@ -31,7 +33,7 @@ class TcpOutgoingConnection(val selector: ActorRef,
   def receive: Receive = PartialFunction.empty
 
   def connecting: Receive = {
-    case Tcp.ChannelConnectable ⇒
+    case ChannelConnectable ⇒
       val connected = channel.finishConnect()
       assert(connected, "Connectable channel failed to connect")
       completeConnect()

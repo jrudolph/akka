@@ -182,7 +182,7 @@ class TcpConnectionSpec extends AkkaSpec with ImplicitSender {
       import setup._
 
       connectionActor.tell(Abort, connectionHandler.ref)
-      connectionHandler.expectMsg(Abort)
+      connectionHandler.expectMsg(Aborted)
       connectionActor.isTerminated must be(true)
 
       val buffer = ByteBuffer.allocate(1)
@@ -254,6 +254,9 @@ class TcpConnectionSpec extends AkkaSpec with ImplicitSender {
     }
 
     // error conditions
+    "report failed connection attempt" in {
+      pending
+    }
     "time out when user level Connected isn't answered with Register" in {
       pending
     }
