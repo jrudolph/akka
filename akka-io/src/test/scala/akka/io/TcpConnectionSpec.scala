@@ -11,6 +11,7 @@ import akka.util.ByteString
 import scala.concurrent.duration._
 import java.nio.channels.spi.SelectorProvider
 import java.io.IOException
+import akka.actor.{ Props, Actor, Terminated }
 
 class TcpConnectionSpec extends AkkaSpec with ImplicitSender {
   val port = 45679
@@ -49,7 +50,7 @@ class TcpConnectionSpec extends AkkaSpec with ImplicitSender {
       clientChannel.isConnected must be(false)
 
       // flag connectable
-      conn.tell(ChannelConnectable, selector.ref)
+      selector.send(conn, ChannelConnectable)
 
       // finished connection
       clientChannel.isConnected must be(true)
@@ -248,23 +249,124 @@ class TcpConnectionSpec extends AkkaSpec with ImplicitSender {
       connectionActor.tell(Write(ByteString("testdata")), connectionHandler.ref)
       //connectionActor.tell(ChannelReadable, selector.ref)
       connectionHandler.expectMsgPF(remaining) {
-        case ErrorClose(exc: IOException) if exc.getMessage == "Connection reset by peer" ⇒
+        case ErrorClose(exc: IOException) ⇒ exc.getMessage must be("Connection reset by peer")
       }
       connectionActor.isTerminated must be(true)
     }
 
     // error conditions
-    "report failed connection attempt" in {
-      pending
+    "report failed connection attempt while not registered" in withLocalServer() { localServer ⇒
+      val userHandler = TestProbe()
+      val selector = TestProbe()
+
+      val connectionActor = TestActorRef(
+        new TcpOutgoingConnection(
+          selector.ref,
+          userHandler.ref,
+          serverAddress,
+          None))
+
+      val clientSideChannel = connectionActor.underlyingActor.channel
+      selector.expectMsg(RegisterClientChannel(clientSideChannel))
+
+      // close instead of accept
+      localServer.close()
+
+      connectionActor.tell(ChannelConnectable, selector.ref)
+      userHandler.expectMsgPF() {
+        case ErrorClose(e) ⇒ e.getMessage must be("Connection reset by peer")
+      }
     }
-    "time out when user level Connected isn't answered with Register" in {
-      pending
+    "report failed connection attempt when target is unreachable" in {
+      val userHandler = TestProbe()
+      val selector = TestProbe()
+
+      val connectionActor = TestActorRef(
+        new TcpOutgoingConnection(
+          selector.ref,
+          userHandler.ref,
+          new InetSocketAddress("127.0.0.38", 4242), // some likely unknown address
+          None))
+
+      val clientSideChannel = connectionActor.underlyingActor.channel
+      selector.expectMsg(RegisterClientChannel(clientSideChannel))
+
+      val sel = SelectorProvider.provider().openSelector()
+      val key = clientSideChannel.register(sel, SelectionKey.OP_CONNECT | SelectionKey.OP_READ)
+      sel.select()
+
+      key.isConnectable must be(true)
+      connectionActor.tell(ChannelConnectable, selector.ref)
+
+      userHandler.expectMsgPF() {
+        case ErrorClose(e) ⇒ e.getMessage must be("Connection refused")
+      }
     }
-    "report a connection error back to the user when the connection attempt fails" in {
-      pending
+    "time out when user level Connected isn't answered with Register" in withLocalServer() { localServer ⇒
+      val userHandler = TestProbe()
+      val selector = TestProbe()
+
+      val connectionActor = TestActorRef(
+        new TcpOutgoingConnection(
+          selector.ref,
+          userHandler.ref,
+          serverAddress,
+          None))
+
+      val watcher = TestProbe()
+      watcher.watch(connectionActor)
+
+      val clientSideChannel = connectionActor.underlyingActor.channel
+      selector.expectMsg(RegisterClientChannel(clientSideChannel))
+
+      localServer.accept()
+      connectionActor.tell(ChannelConnectable, selector.ref)
+
+      userHandler.expectMsg(Connected(clientSideChannel.getLocalAddress.asInstanceOf[InetSocketAddress], serverAddress))
+
+      watcher.expectMsgPF(3.seconds) {
+        case Terminated(`connectionActor`) ⇒
+      }
+      clientSideChannel.isOpen must be(false)
     }
-    "close the actor on IOExceptions during normal operation" in {
-      pending
+    "close the connection when user handler dies while connecting" in withLocalServer() { localServer ⇒
+      val userHandler = system.actorOf(Props(new Actor {
+        def receive = PartialFunction.empty
+      }))
+      val selector = TestProbe()
+
+      val connectionActor = TestActorRef(
+        new TcpOutgoingConnection(
+          selector.ref,
+          userHandler,
+          serverAddress,
+          None))
+
+      val watcher = TestProbe()
+      watcher.watch(connectionActor)
+
+      val clientSideChannel = connectionActor.underlyingActor.channel
+      selector.expectMsg(RegisterClientChannel(clientSideChannel))
+
+      system.stop(userHandler)
+
+      watcher.expectMsgPF(1.seconds) {
+        case Terminated(`connectionActor`) ⇒
+      }
+      clientSideChannel.isOpen must be(false)
+    }
+    "close the connection when connection handler dies while connected" in withEstablishedConnection() { setup ⇒
+      import setup._
+
+      val watcher = TestProbe()
+      watcher.watch(connectionActor)
+
+      system.stop(connectionHandler.ref)
+
+      watcher.expectMsgPF(1.seconds) {
+        case Terminated(`connectionActor`) ⇒
+      }
+      clientSideChannel.isOpen must be(false)
     }
   }
 

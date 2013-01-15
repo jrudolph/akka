@@ -1,10 +1,11 @@
 package akka.io
 
-import akka.actor.{ ActorRef, Actor }
+import akka.actor.{ Terminated, ActorRef, Actor }
 import java.net.InetSocketAddress
 import java.nio.channels.SocketChannel
 import collection.immutable.Queue
 import akka.io.Tcp.{ RegisterClientChannel, ChannelConnectable }
+import java.io.IOException
 
 /**
  * An actor handling the connection state machine for an outgoing connection
@@ -16,17 +17,17 @@ class TcpOutgoingConnection(val selector: ActorRef,
                             localAddress: Option[InetSocketAddress]) extends Actor with TcpBaseConnection {
   val channel = openChannel()
 
-  override def preStart() {
-    localAddress.foreach(channel.bind)
+  context.watch(handler)
 
-    val connected = channel.connect(remoteAddress)
-    if (connected)
-      completeConnect()
-    else {
-      selector ! RegisterClientChannel(channel)
+  localAddress.foreach(channel.bind)
 
-      context.become(connecting)
-    }
+  val connected = channel.connect(remoteAddress)
+  if (connected)
+    completeConnect()
+  else {
+    selector ! RegisterClientChannel(channel)
+
+    context.become(connecting)
   }
 
   // fixme: do we do it like this?
@@ -34,9 +35,15 @@ class TcpOutgoingConnection(val selector: ActorRef,
 
   def connecting: Receive = {
     case ChannelConnectable ⇒
-      val connected = channel.finishConnect()
-      assert(connected, "Connectable channel failed to connect")
-      completeConnect()
+      try {
+        val connected = channel.finishConnect()
+        assert(connected, "Connectable channel failed to connect")
+        completeConnect()
+      } catch {
+        case e: IOException ⇒ handleError(handler, e)
+      }
+
+    case Terminated(`handler`) ⇒ context.stop(self)
   }
 
   def openChannel(): SocketChannel = {

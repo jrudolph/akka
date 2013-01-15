@@ -1,18 +1,17 @@
 package akka.io
 
-import akka.actor.{ ActorRef, Actor }
+import akka.actor.{ ReceiveTimeout, Terminated, ActorRef, Actor }
+import scala.concurrent.duration._
 import java.nio.channels.SocketChannel
 import akka.io.Tcp._
-import java.nio.ByteBuffer
 import akka.util.ByteString
-import collection.immutable.Queue
-import java.net.{ StandardSocketOptions, SocketOptions, InetSocketAddress }
+import java.net.{ StandardSocketOptions, InetSocketAddress }
 import java.io.IOException
 
 /**
  * The base for TcpIncomingConnection and TcpOutgoingCOnnection.
  */
-trait TcpBaseConnection { self: Actor ⇒
+trait TcpBaseConnection { _: Actor ⇒
   def channel: SocketChannel
   def selector: ActorRef
   def handler: ActorRef
@@ -28,9 +27,15 @@ trait TcpBaseConnection { self: Actor ⇒
     case Register(handler) ⇒
       selector ! ReadInterest
 
+      context.setReceiveTimeout(Duration.Undefined)
+      context.watch(handler)
+
       context.become(connected(handler))
 
-    case cmd: CloseCommand ⇒ handleClose(handler, closeResponse(cmd))
+    case cmd: CloseCommand                     ⇒ handleClose(handler, closeResponse(cmd))
+
+    case ReceiveTimeout                        ⇒ context.stop(self)
+    case Terminated(actor) if actor == handler ⇒ context.stop(self)
   }
 
   /** normal connected state */
@@ -45,10 +50,12 @@ trait TcpBaseConnection { self: Actor ⇒
 
     // drop packet
 
-    case write: Write      ⇒ doWrite(handler, write)
-    case ChannelWritable   ⇒ doWrite(handler, remainingWrite)
+    case write: Write                          ⇒ doWrite(handler, write)
+    case ChannelWritable                       ⇒ doWrite(handler, remainingWrite)
 
-    case cmd: CloseCommand ⇒ handleClose(handler, closeResponse(cmd))
+    case cmd: CloseCommand                     ⇒ handleClose(handler, closeResponse(cmd))
+
+    case Terminated(actor) if actor == handler ⇒ context.stop(self)
   }
 
   /** connection is closing but a write has to be finished first */
@@ -61,13 +68,17 @@ trait TcpBaseConnection { self: Actor ⇒
       if (!currentlyWriting) // write is now finished
         handleClose(handler, closedEvent)
 
-    case Abort ⇒ handleClose(handler, Aborted)
+    case Abort                                 ⇒ handleClose(handler, Aborted)
+
+    case Terminated(actor) if actor == handler ⇒ context.stop(self)
   }
 
   /** connection is closed on our side and we're waiting from confirmation from the other side */
   def closing(handler: ActorRef): Receive = {
-    case ChannelReadable ⇒ doRead(handler)
-    case Abort           ⇒ handleClose(handler, Aborted)
+    case ChannelReadable                       ⇒ doRead(handler)
+    case Abort                                 ⇒ handleClose(handler, Aborted)
+
+    case Terminated(actor) if actor == handler ⇒ context.stop(self)
   }
 
   // AUXILIARIES and IMPLEMENTATION
@@ -77,6 +88,9 @@ trait TcpBaseConnection { self: Actor ⇒
     handler ! Connected(
       channel.getLocalAddress.asInstanceOf[InetSocketAddress],
       channel.getRemoteAddress.asInstanceOf[InetSocketAddress])
+
+    // FIXME: make configurable
+    context.setReceiveTimeout(2.seconds)
 
     context.become(waitingForRegistration)
   }
@@ -93,7 +107,7 @@ trait TcpBaseConnection { self: Actor ⇒
 
         // try reading more
         // FIXME: loop here directly? if yes, how often?
-        context.self ! ChannelReadable
+        self ! ChannelReadable
       } else if (read == 0) selector ! ReadInterest
       else if (read == -1) doCloseConnection(handler, closeReason)
       else throw new IllegalStateException("Unexpected value returned from read: " + read)
@@ -122,7 +136,7 @@ trait TcpBaseConnection { self: Actor ⇒
       // ChannelWritable now or soon after so we can avoid having to use the selector
       // in many cases. The downside is possibly spinning with low write rates.
       // if (currentlyWriting && wrote > 0)
-      //   context.self ! ChannelWritable
+      //   self ! ChannelWritable
       // else
 
       if (currentlyWriting) // still data to write
@@ -151,12 +165,11 @@ trait TcpBaseConnection { self: Actor ⇒
   }
 
   def doCloseConnection(handler: ActorRef, closedEvent: ConnectionClosed): Unit = {
-    if (closedEvent == Aborted)
-      channel.setOption(StandardSocketOptions.SO_LINGER, 0: Integer)
+    if (closedEvent == Aborted) abort()
+    else channel.close()
 
-    channel.close()
     handler ! closedEvent
-    context.stop(context.self)
+    context.stop(self)
   }
 
   def closeResponse(closeCommand: CloseCommand): ConnectionClosed = closeCommand match {
@@ -168,8 +181,19 @@ trait TcpBaseConnection { self: Actor ⇒
   def handleError(handler: ActorRef, exception: IOException) {
     handler ! ErrorClose(exception)
 
-    // FIXME: should we abort here instead?
+    if (channel.isOpen)
+      abort()
+
+    context.stop(self)
+  }
+
+  def abort(): Unit = {
+    channel.setOption(StandardSocketOptions.SO_LINGER, 0: Integer)
     channel.close()
-    context.stop(context.self)
+  }
+
+  override def postStop() {
+    if (channel.isOpen)
+      abort()
   }
 }
