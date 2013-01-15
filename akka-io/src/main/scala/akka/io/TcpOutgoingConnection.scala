@@ -12,10 +12,10 @@ import java.io.IOException
  * to be established.
  */
 class TcpOutgoingConnection(val selector: ActorRef,
-                            val commander: ActorRef,
+                            commander: ActorRef,
                             remoteAddress: InetSocketAddress,
                             localAddress: Option[InetSocketAddress],
-                            val options: immutable.Seq[SocketOption])
+                            options: immutable.Seq[SocketOption])
   extends Actor
   with ActorLogging
   with TcpBaseConnection {
@@ -28,22 +28,22 @@ class TcpOutgoingConnection(val selector: ActorRef,
 
   log.debug("Attempting connection to {}", remoteAddress)
   if (channel.connect(remoteAddress))
-    completeConnect()
+    completeConnect(commander, options)
   else {
     selector ! RegisterClientChannel(channel)
 
-    context.become(connecting)
+    context.become(connecting(commander, options))
   }
 
   def receive: Receive = PartialFunction.empty
 
-  def connecting: Receive = {
+  def connecting(commander: ActorRef, options: immutable.Seq[SocketOption]): Receive = {
     case ChannelConnectable ⇒
       try {
         val connected = channel.finishConnect()
         log.debug("Connection established")
         assert(connected, "Connectable channel failed to connect")
-        completeConnect()
+        completeConnect(commander, options)
       } catch {
         case e: IOException ⇒ handleError(commander, e)
       }

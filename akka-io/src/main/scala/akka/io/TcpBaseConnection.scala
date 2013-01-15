@@ -18,8 +18,6 @@ import Tcp._
 trait TcpBaseConnection extends WithDirectBuffer { _: Actor with ActorLogging â‡’
   def channel: SocketChannel
   def selector: ActorRef
-  def commander: ActorRef
-  def options: immutable.Seq[SocketOption]
 
   /** a write queue of size 1 to contain one unfinished write command */
   var remainingWrite: Write = EmptyWrite
@@ -28,7 +26,7 @@ trait TcpBaseConnection extends WithDirectBuffer { _: Actor with ActorLogging â‡
   // STATES
 
   /** connection established, waiting for registration from user handler */
-  def waitingForRegistration: Receive = {
+  def waitingForRegistration(commander: ActorRef): Receive = {
     case Register(handler) â‡’
       log.debug("{} registered as connection handler for this connection", handler)
 
@@ -89,7 +87,7 @@ trait TcpBaseConnection extends WithDirectBuffer { _: Actor with ActorLogging â‡
   // AUXILIARIES and IMPLEMENTATION
 
   /** use in subclasses to start the common machinery above once a channel is connected */
-  def completeConnect(): Unit = {
+  def completeConnect(commander: ActorRef, options: immutable.Seq[SocketOption]): Unit = {
     options.foreach(_.afterConnect(channel.socket))
 
     commander ! Connected(
@@ -98,7 +96,7 @@ trait TcpBaseConnection extends WithDirectBuffer { _: Actor with ActorLogging â‡
 
     context.setReceiveTimeout(Tcp(context.system).Settings.RegisterTimeout)
 
-    context.become(waitingForRegistration)
+    context.become(waitingForRegistration(commander))
   }
 
   def doRead(handler: ActorRef): Unit = {

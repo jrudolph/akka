@@ -13,9 +13,9 @@ import Tcp.SocketOption
  * SocketChannel.
  */
 class TcpIncomingConnection(val selector: ActorRef,
-                            val commander: ActorRef,
+                            commander: ActorRef,
                             val channel: SocketChannel,
-                            val options: immutable.Seq[SocketOption])
+                            options: immutable.Seq[SocketOption])
   extends Actor
   with ActorLogging
   with TcpBaseConnection {
@@ -23,7 +23,7 @@ class TcpIncomingConnection(val selector: ActorRef,
   context.watch(commander)
 
   channel.configureBlocking(false)
-  completeConnect()
+  completeConnect(commander, options)
 
   def receive = PartialFunction.empty
 }
