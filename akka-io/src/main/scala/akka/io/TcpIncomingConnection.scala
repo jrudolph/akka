@@ -4,7 +4,7 @@ import collection.immutable
 
 import java.nio.channels.SocketChannel
 
-import akka.actor.{ Actor, ActorRef }
+import akka.actor.{ ActorLogging, Actor, ActorRef }
 
 import Tcp.SocketOption
 
@@ -15,7 +15,11 @@ import Tcp.SocketOption
 class TcpIncomingConnection(val selector: ActorRef,
                             val commander: ActorRef,
                             val channel: SocketChannel,
-                            val options: immutable.Seq[SocketOption]) extends Actor with TcpBaseConnection {
+                            val options: immutable.Seq[SocketOption])
+  extends Actor
+  with ActorLogging
+  with TcpBaseConnection {
+
   context.watch(commander)
 
   channel.configureBlocking(false)

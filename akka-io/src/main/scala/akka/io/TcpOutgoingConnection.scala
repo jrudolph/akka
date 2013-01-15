@@ -1,6 +1,6 @@
 package akka.io
 
-import akka.actor.{ Terminated, ActorRef, Actor }
+import akka.actor.{ ActorLogging, Terminated, ActorRef, Actor }
 import java.net.InetSocketAddress
 import java.nio.channels.SocketChannel
 import collection.immutable
@@ -15,7 +15,10 @@ class TcpOutgoingConnection(val selector: ActorRef,
                             val commander: ActorRef,
                             remoteAddress: InetSocketAddress,
                             localAddress: Option[InetSocketAddress],
-                            val options: immutable.Seq[SocketOption]) extends Actor with TcpBaseConnection {
+                            val options: immutable.Seq[SocketOption])
+  extends Actor
+  with ActorLogging
+  with TcpBaseConnection {
   val channel = openChannel()
 
   context.watch(commander)
@@ -23,6 +26,7 @@ class TcpOutgoingConnection(val selector: ActorRef,
   localAddress.foreach(channel.bind)
   options.foreach(_.beforeConnect(channel.socket))
 
+  log.debug("Attempting connection to {}", remoteAddress)
   if (channel.connect(remoteAddress))
     completeConnect()
   else {
@@ -37,6 +41,7 @@ class TcpOutgoingConnection(val selector: ActorRef,
     case ChannelConnectable ⇒
       try {
         val connected = channel.finishConnect()
+        log.debug("Connection established")
         assert(connected, "Connectable channel failed to connect")
         completeConnect()
       } catch {

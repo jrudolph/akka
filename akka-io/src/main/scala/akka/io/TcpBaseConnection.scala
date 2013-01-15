@@ -1,19 +1,21 @@
 package akka.io
 
-import collection.immutable
-
-import akka.actor.{ ReceiveTimeout, Terminated, ActorRef, Actor }
-import scala.concurrent.duration._
-import java.nio.channels.SocketChannel
-import akka.io.Tcp._
-import akka.util.ByteString
 import java.net.{ StandardSocketOptions, InetSocketAddress }
 import java.io.IOException
+import java.nio.channels.SocketChannel
+
+import collection.immutable
+
+import scala.concurrent.duration._
+import akka.actor._
+import akka.util.ByteString
+
+import Tcp._
 
 /**
  * The base for TcpIncomingConnection and TcpOutgoingConnection.
  */
-trait TcpBaseConnection extends WithDirectBuffer { _: Actor ⇒
+trait TcpBaseConnection extends WithDirectBuffer { _: Actor with ActorLogging ⇒
   def channel: SocketChannel
   def selector: ActorRef
   def commander: ActorRef
@@ -28,6 +30,8 @@ trait TcpBaseConnection extends WithDirectBuffer { _: Actor ⇒
   /** connection established, waiting for registration from user handler */
   def waitingForRegistration: Receive = {
     case Register(handler) ⇒
+      log.debug("{} registered as connection handler for this connection", handler)
+
       selector ! ReadInterest
 
       context.setReceiveTimeout(Duration.Undefined)
@@ -43,11 +47,14 @@ trait TcpBaseConnection extends WithDirectBuffer { _: Actor ⇒
 
   /** normal connected state */
   def connected(handler: ActorRef): Receive = {
-    case StopReading                           ⇒ selector ! StopReading
-    case ResumeReading                         ⇒ selector ! ReadInterest
-    case ChannelReadable                       ⇒ doRead(handler)
+    case StopReading     ⇒ selector ! StopReading
+    case ResumeReading   ⇒ selector ! ReadInterest
+    case ChannelReadable ⇒ doRead(handler)
 
-    case write: Write if currentlyWriting      ⇒ handler ! CommandFailed(write)
+    case write: Write if currentlyWriting ⇒
+      log.debug("Dropping write because queue is already full")
+
+      handler ! CommandFailed(write)
     case write: Write                          ⇒ doWrite(handler, write)
     case ChannelWritable                       ⇒ doWrite(handler, remainingWrite)
 
@@ -98,18 +105,27 @@ trait TcpBaseConnection extends WithDirectBuffer { _: Actor ⇒
     val buffer = getDirectBuffer()
 
     try {
+      log.debug("Trying to read from channel")
+
       val read = channel.read(buffer)
       buffer.flip()
 
       if (read > 0) {
+        log.debug("Read returned {} bytes", read)
+
         handler ! Received(ByteString(buffer).take(read))
 
         // try reading more
         // FIXME: loop here directly? if yes, how often?
         self ! ChannelReadable
-      } else if (read == 0) selector ! ReadInterest
-      else if (read == -1) doCloseConnection(handler, closeReason)
-      else throw new IllegalStateException("Unexpected value returned from read: " + read)
+      } else if (read == 0) {
+        log.debug("Read returned nothing. Registering read interest with selector", read)
+
+        selector ! ReadInterest
+      } else if (read == -1) {
+        log.debug("Read returned end-of-stream", read)
+        doCloseConnection(handler, closeReason)
+      } else throw new IllegalStateException("Unexpected value returned from read: " + read)
     } catch {
       case e: IOException ⇒
         handleError(handler, e)
@@ -117,7 +133,6 @@ trait TcpBaseConnection extends WithDirectBuffer { _: Actor ⇒
   }
 
   def doWrite(handler: ActorRef, write: Write): Unit = {
-    // data should be written on the network
     val data = write.data
 
     val buffer = getDirectBuffer()
@@ -125,7 +140,11 @@ trait TcpBaseConnection extends WithDirectBuffer { _: Actor ⇒
     buffer.flip()
 
     try {
+      log.debug("Trying to write to channel")
+
       val wrote = channel.write(buffer)
+
+      log.debug("Wrote {} bytes", wrote)
 
       remainingWrite = write.consume(wrote)
       if (!currentlyWriting && write.ack != null)
@@ -151,16 +170,25 @@ trait TcpBaseConnection extends WithDirectBuffer { _: Actor ⇒
     else PeerClosed
 
   def handleClose(handler: ActorRef, closedEvent: ConnectionClosed) {
-    if (closedEvent == Aborted) // close instantly
+    if (closedEvent == Aborted) { // close instantly
+      log.debug("Got abort command. RSTing connection.")
+
       doCloseConnection(handler, closedEvent)
-    else if (currentlyWriting) // finish writing first
+    } else if (currentlyWriting) { // finish writing first
+      log.debug("Got close command but write is still pending.")
+
       context.become(closingWithPendingWrite(handler, closedEvent))
-    else if (closedEvent == ConfirmedClosed) { // shutdown output and wait for confirmation
+    } else if (closedEvent == ConfirmedClosed) { // shutdown output and wait for confirmation
+      log.debug("Got ConfirmedClose command, shutting down our side.")
+
       channel.socket.shutdownOutput()
 
       context.become(closing(handler))
-    } else // close now
+    } else { // close now
+      log.debug("Got Close command, closing connection.")
+
       doCloseConnection(handler, closedEvent)
+    }
   }
 
   def doCloseConnection(handler: ActorRef, closedEvent: ConnectionClosed): Unit = {
