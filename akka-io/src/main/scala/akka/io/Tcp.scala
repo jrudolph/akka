@@ -30,11 +30,9 @@ object Tcp {
     def data: ByteString
     def isEmpty: Boolean
     def ack: AnyRef
-    def nack: AnyRef
 
     /** Returns a new write with `numBytes` removed from the front */
     def consume(numBytes: Int): Write
-    def consumeNack: Write
   }
   object Write {
     def empty: Write = EmptyWrite
@@ -55,21 +53,6 @@ object Tcp {
 
       def consumeNack: Write =
         this
-    }
-    def apply(_data: ByteString, _ack: AnyRef, _nack: AnyRef): Write = new Write {
-      def data: ByteString = _data
-      def isEmpty: Boolean = _data.isEmpty
-      def ack: AnyRef = _ack
-      def nack: AnyRef = _nack
-
-      /** Returns a new write with `numBytes` removed from the front */
-      def consume(numBytes: Int): Write =
-        if (numBytes == 0) this
-        else if (numBytes == _data.length) empty
-        else apply(_data.drop(numBytes), _ack, _nack)
-
-      def consumeNack: Write =
-        apply(_data, _ack)
     }
   }
 
@@ -93,8 +76,9 @@ object Tcp {
   /// EVENTS
   sealed trait Event
 
-  case class Received(data: ByteString) extends Event
   case class Connected(localAddress: InetSocketAddress, remoteAddress: InetSocketAddress) extends Event
+  case class Received(data: ByteString) extends Event
+  case class NAck(write: Write) extends Event
 
   sealed trait ConnectionClosed extends Event
   case object Closed extends ConnectionClosed

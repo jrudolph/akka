@@ -107,15 +107,13 @@ class TcpConnectionSpec extends AkkaSpec with ImplicitSender {
 
         object Ack1
         object Ack2
-        object NAck1
-        object NAck2
 
         //serverSideChannel.configureBlocking(false)
         clientSideChannel.setOption(StandardSocketOptions.SO_SNDBUF, 1024: Integer)
 
         // producing backpressure by sending much more than currently fits into
         // our send buffer
-        val firstWrite = writeCmd(Ack1, NAck1)
+        val firstWrite = writeCmd(Ack1)
 
         // try to write the buffer but since the SO_SNDBUF is too small
         // it will have to keep the rest of the piece and send it
@@ -125,8 +123,9 @@ class TcpConnectionSpec extends AkkaSpec with ImplicitSender {
 
         // send another write which should nack immediately
         // because we don't store more than one piece in flight
-        connectionHandler.send(connectionActor, writeCmd(Ack2, NAck2))
-        connectionHandler.expectMsg(NAck2)
+        val secondWrite = writeCmd(Ack2)
+        connectionHandler.send(connectionActor, secondWrite)
+        connectionHandler.expectMsg(NAck(secondWrite))
 
         // there will be immediately more space in the SND_BUF because
         // some data will have been send now, so we assume we can write
@@ -166,7 +165,7 @@ class TcpConnectionSpec extends AkkaSpec with ImplicitSender {
       clientSideChannel.setOption(StandardSocketOptions.SO_SNDBUF, 1024: Integer)
 
       // we send a write and a close command directly afterwards
-      connectionHandler.send(connectionActor, writeCmd(Ack, null))
+      connectionHandler.send(connectionActor, writeCmd(Ack))
       connectionHandler.send(connectionActor, Close)
 
       setup.pullFromServerSide(TestSize)
@@ -201,7 +200,7 @@ class TcpConnectionSpec extends AkkaSpec with ImplicitSender {
       clientSideChannel.setOption(StandardSocketOptions.SO_SNDBUF, 1024: Integer)
 
       // we send a write and a close command directly afterwards
-      connectionHandler.send(connectionActor, writeCmd(Ack, null))
+      connectionHandler.send(connectionActor, writeCmd(Ack))
       connectionHandler.send(connectionActor, ConfirmedClose)
 
       setup.pullFromServerSide(TestSize)
@@ -443,8 +442,8 @@ class TcpConnectionSpec extends AkkaSpec with ImplicitSender {
   }
 
   val TestSize = 10000
-  def writeCmd(ack: AnyRef, nack: AnyRef) =
-    Write(ByteString(Array.fill[Byte](TestSize)(0)), ack, nack)
+  def writeCmd(ack: AnyRef) =
+    Write(ByteString(Array.fill[Byte](TestSize)(0)), ack)
 
   def setSmallRcvBuffer(channel: ServerSocketChannel) =
     channel.setOption(StandardSocketOptions.SO_RCVBUF, 1024: Integer)

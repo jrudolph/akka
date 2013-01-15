@@ -40,16 +40,11 @@ trait TcpBaseConnection { _: Actor ⇒
 
   /** normal connected state */
   def connected(handler: ActorRef): Receive = {
-    case StopReading     ⇒ selector ! StopReading
-    case ResumeReading   ⇒ selector ! ReadInterest
-    case ChannelReadable ⇒ doRead(handler)
+    case StopReading                           ⇒ selector ! StopReading
+    case ResumeReading                         ⇒ selector ! ReadInterest
+    case ChannelReadable                       ⇒ doRead(handler)
 
-    case write: Write if currentlyWriting ⇒
-      if (write.nack != null)
-        handler ! write.nack
-
-    // drop packet
-
+    case write: Write if currentlyWriting      ⇒ handler ! NAck(write)
     case write: Write                          ⇒ doWrite(handler, write)
     case ChannelWritable                       ⇒ doWrite(handler, remainingWrite)
 
