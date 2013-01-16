@@ -15,7 +15,7 @@ import Tcp.SocketOption
 class TcpIncomingConnection(val selector: ActorRef,
                             commander: ActorRef,
                             val channel: SocketChannel,
-                            options: immutable.Seq[SocketOption]) extends TcpBaseConnection {
+                            options: immutable.Seq[SocketOption]) extends TcpConnection {
 
   context.watch(commander) // sign death pact
 

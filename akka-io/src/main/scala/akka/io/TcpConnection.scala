@@ -15,7 +15,7 @@ import Tcp._
 /**
  * The base for TcpIncomingConnection and TcpOutgoingConnection.
  */
-private[io] abstract class TcpBaseConnection extends Actor with ActorLogging with WithDirectBuffer {
+private[io] abstract class TcpConnection extends Actor with ActorLogging with WithDirectBuffer {
   def channel: SocketChannel
   def selector: ActorRef
 

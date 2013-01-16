@@ -15,7 +15,7 @@ class TcpOutgoingConnection(val selector: ActorRef,
                             commander: ActorRef,
                             remoteAddress: InetSocketAddress,
                             localAddress: Option[InetSocketAddress],
-                            options: immutable.Seq[SocketOption]) extends TcpBaseConnection {
+                            options: immutable.Seq[SocketOption]) extends TcpConnection {
   val channel = openChannel()
 
   context.watch(commander) // sign death pact
