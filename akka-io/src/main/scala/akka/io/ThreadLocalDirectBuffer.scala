@@ -1,3 +1,7 @@
+/**
+ * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ */
+
 package akka.io
 
 import java.nio.ByteBuffer
@@ -8,18 +12,21 @@ import akka.actor.Actor
  * configuration of the actor system. An underlying assumption is that all of
  * the threads which call `getDirectBuffer` are owned by the actor system.
  */
-trait WithDirectBuffer { _: Actor ⇒
-  def getDirectBuffer(): ByteBuffer = {
-    val result = WithDirectBuffer.threadLocalBuffer.get()
+trait ThreadLocalDirectBuffer { _: Actor ⇒
+  def directBuffer(): ByteBuffer = {
+    val result = ThreadLocalDirectBuffer.threadLocalBuffer.get()
     if (result == null) {
       val size = Tcp(context.system).Settings.DirectBufferSize
       val newBuffer = ByteBuffer.allocateDirect(size)
-      WithDirectBuffer.threadLocalBuffer.set(newBuffer)
+      ThreadLocalDirectBuffer.threadLocalBuffer.set(newBuffer)
       newBuffer
-    } else result.clear().asInstanceOf[ByteBuffer]
+    } else {
+      result.clear()
+      result
+    }
   }
 }
 
-object WithDirectBuffer {
-  private[WithDirectBuffer] val threadLocalBuffer = new ThreadLocal[ByteBuffer]
+object ThreadLocalDirectBuffer {
+  private val threadLocalBuffer = new ThreadLocal[ByteBuffer]
 }

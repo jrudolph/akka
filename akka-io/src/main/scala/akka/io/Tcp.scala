@@ -147,10 +147,8 @@ object Tcp extends ExtensionKey[TcpExt] {
   case class Write(data: ByteString, ack: AnyRef) extends Command
   object Write {
     val Empty: Write = Write(ByteString.empty, null)
-
-    def apply(_data: ByteString): Write =
-      if (_data.isEmpty) Empty
-      else Write(_data, null)
+    def apply(data: ByteString): Write =
+      if (data.isEmpty) Empty else Write(data, null)
   }
 
   case object StopReading extends Command
@@ -159,10 +157,11 @@ object Tcp extends ExtensionKey[TcpExt] {
   /// EVENTS
   sealed trait Event
 
-  case object Bound extends Event
-  case class Connected(localAddress: InetSocketAddress, remoteAddress: InetSocketAddress) extends Event
   case class Received(data: ByteString) extends Event
+  case class Connected(remoteAddress: InetSocketAddress, localAddress: InetSocketAddress) extends Event
   case class CommandFailed(cmd: Command) extends Event
+  case object Bound extends Event
+  case object Unbound extends Event
 
   sealed trait ConnectionClosed extends Event
   case object Closed extends ConnectionClosed

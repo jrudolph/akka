@@ -1,23 +1,26 @@
+/**
+ * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ */
+
 package akka.io
 
-import akka.actor.{ ActorLogging, Terminated, ActorRef, Actor }
 import java.net.InetSocketAddress
-import java.nio.channels.SocketChannel
-import collection.immutable
-import akka.io.Tcp.{ SocketOption, RegisterClientChannel, ChannelConnectable }
 import java.io.IOException
+import java.nio.channels.SocketChannel
+import scala.collection.immutable
+import akka.actor.ActorRef
+import Tcp._
 
 /**
  * An actor handling the connection state machine for an outgoing connection
  * to be established.
  */
-class TcpOutgoingConnection(val selector: ActorRef,
+class TcpOutgoingConnection(_selector: ActorRef,
                             commander: ActorRef,
                             remoteAddress: InetSocketAddress,
                             localAddress: Option[InetSocketAddress],
-                            options: immutable.Seq[SocketOption]) extends TcpConnection {
-  val channel = openChannel()
-
+                            options: immutable.Seq[SocketOption])
+  extends TcpConnection(_selector, SocketChannel.open()) {
   context.watch(commander) // sign death pact
 
   localAddress.foreach(channel.socket.bind)
@@ -28,7 +31,6 @@ class TcpOutgoingConnection(val selector: ActorRef,
     completeConnect(commander, options)
   else {
     selector ! RegisterClientChannel(channel)
-
     context.become(connecting(commander, options))
   }
 
@@ -38,17 +40,12 @@ class TcpOutgoingConnection(val selector: ActorRef,
     case ChannelConnectable ⇒
       try {
         val connected = channel.finishConnect()
-        log.debug("Connection established")
         assert(connected, "Connectable channel failed to connect")
+        log.debug("Connection established")
         completeConnect(commander, options)
       } catch {
         case e: IOException ⇒ handleError(commander, e)
       }
   }
 
-  def openChannel(): SocketChannel = {
-    val channel = SocketChannel.open()
-    channel.configureBlocking(false)
-    channel
-  }
 }

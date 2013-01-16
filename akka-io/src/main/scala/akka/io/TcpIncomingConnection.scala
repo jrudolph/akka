@@ -1,26 +1,26 @@
+/**
+ * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ */
+
 package akka.io
 
-import collection.immutable
-
 import java.nio.channels.SocketChannel
-
-import akka.actor.{ ActorLogging, Actor, ActorRef }
-
+import scala.collection.immutable
+import akka.actor.ActorRef
 import Tcp.SocketOption
 
 /**
  * An actor handling the connection state machine for an incoming, already connected
  * SocketChannel.
  */
-class TcpIncomingConnection(val selector: ActorRef,
-                            commander: ActorRef,
-                            val channel: SocketChannel,
-                            options: immutable.Seq[SocketOption]) extends TcpConnection {
+class TcpIncomingConnection(_selector: ActorRef,
+                            _channel: SocketChannel,
+                            handler: ActorRef,
+                            options: immutable.Seq[SocketOption]) extends TcpConnection(_selector, _channel) {
 
-  context.watch(commander) // sign death pact
+  context.watch(handler) // sign death pact
 
-  channel.configureBlocking(false)
-  completeConnect(commander, options)
+  completeConnect(handler, options)
 
   def receive = PartialFunction.empty
 }
