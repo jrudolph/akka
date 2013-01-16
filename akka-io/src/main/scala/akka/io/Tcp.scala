@@ -144,41 +144,16 @@ object Tcp extends ExtensionKey[TcpExt] {
   case object ConfirmedClose extends CloseCommand
   case object Abort extends CloseCommand
 
-  trait Write extends Command {
-    def data: ByteString
-    def isEmpty: Boolean
-    def ack: AnyRef
-
-    /** Returns a new write with `numBytes` removed from the front */
-    def consume(numBytes: Int): Write
-  }
+  case class Write(data: ByteString, ack: AnyRef) extends Command
   object Write {
     def empty: Write = EmptyWrite
 
-    def apply(_data: ByteString): Write = apply(_data, null)
-    def apply(_data: ByteString, _ack: AnyRef): Write = new Write {
-      def data: ByteString = _data
-      def isEmpty: Boolean = _data.isEmpty
+    def apply(_data: ByteString): Write =
+      if (_data.isEmpty) empty
+      else Write(_data, null)
 
-      def ack: AnyRef = _ack
-
-      def consume(numBytes: Int): Write =
-        if (numBytes == 0) this
-        else if (numBytes == _data.length) empty
-        else apply(_data.drop(numBytes), _ack)
-    }
-  }
-
-  /** The EmptyWrite, we use this in TcpBaseConnection as a marker for the empty write queue */
-  private[io] object EmptyWrite extends Write {
-    def data: ByteString = ByteString.empty
-    def isEmpty: Boolean = true
-
-    def consume(numBytes: Int): Write =
-      if (numBytes == 0) this
-      else throw new IllegalStateException("Can't consume bytes from an EmptyWrite")
-
-    def ack: AnyRef = throw new UnsupportedOperationException("Shouldn't be called on EmptyWrite")
+    /** The EmptyWrite, we use this in TcpBaseConnection as a marker for the empty write queue */
+    private[io] object EmptyWrite extends Write(ByteString.empty, null)
   }
 
   case object StopReading extends Command

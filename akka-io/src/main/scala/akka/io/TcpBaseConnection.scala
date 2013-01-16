@@ -20,8 +20,8 @@ trait TcpBaseConnection extends Actor with WithDirectBuffer { _: Actor with Acto
   def selector: ActorRef
 
   /** a write queue of size 1 to contain one unfinished write command */
-  var remainingWrite: Write = EmptyWrite
-  def currentlyWriting = !remainingWrite.isEmpty
+  var remainingWrite: Write = Write.EmptyWrite
+  def currentlyWriting = remainingWrite != Write.EmptyWrite
 
   // STATES
 
@@ -133,11 +133,11 @@ trait TcpBaseConnection extends Actor with WithDirectBuffer { _: Actor with Acto
     try {
       log.debug("Trying to write to channel")
 
-      val wrote = channel.write(buffer)
+      val writtenBytes = channel.write(buffer)
 
-      log.debug("Wrote {} bytes", wrote)
+      log.debug("Wrote {} bytes", writtenBytes)
 
-      remainingWrite = write.consume(wrote)
+      remainingWrite = consume(write, writtenBytes)
       if (!currentlyWriting && write.ack != null)
         handler ! write.ack
 
@@ -211,5 +211,18 @@ trait TcpBaseConnection extends Actor with WithDirectBuffer { _: Actor with Acto
   override def postStop() {
     if (channel.isOpen)
       abort()
+  }
+
+  /** Returns a new write with `numBytes` removed from the front */
+  def consume(write: Write, numBytes: Int): Write = write match {
+    case Write.EmptyWrite if numBytes == 0 ⇒ write
+    case _ ⇒
+      numBytes match {
+        case 0                           ⇒ write
+        case x if x == write.data.length ⇒ Write.empty
+        case _ ⇒
+          require(numBytes > 0 && numBytes < write.data.length)
+          write.copy(data = write.data.drop(numBytes))
+      }
   }
 }
