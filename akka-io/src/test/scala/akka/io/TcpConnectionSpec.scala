@@ -14,7 +14,7 @@ import java.io.IOException
 import akka.actor.{ ActorRef, Props, Actor, Terminated }
 import collection.immutable
 
-class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") {
+class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 100ms") {
   val port = 45679
   val localhost = InetAddress.getLocalHost
   val serverAddress = new InetSocketAddress(localhost, port)
@@ -53,7 +53,7 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") {
       clientChannel.isConnected must be(true)
 
       // report connection establishment
-      userHandler.expectMsg(Connected(clientChannel.getLocalAddress.asInstanceOf[InetSocketAddress], serverAddress))
+      userHandler.expectMsg(Connected(clientChannel.socket.getLocalSocketAddress.asInstanceOf[InetSocketAddress], serverAddress))
 
       // register a connectionHandler for receiving data from now on
       userHandler.send(conn, Register(connectionHandler.ref))
@@ -68,7 +68,7 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") {
         createConnectionActor(selector.ref, userHandler.ref, options = Vector(SO.ReuseAddress(true)))
 
       val clientChannel = connectionActor.underlyingActor.channel
-      clientChannel.getOption(StandardSocketOptions.SO_REUSEADDR).booleanValue() must be(true)
+      clientChannel.socket.getReuseAddress must be(true)
     }
     "set socket options after connecting" in withLocalServer() { localServer ⇒
       val userHandler = TestProbe()
@@ -78,9 +78,9 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") {
         createConnectionActor(selector.ref, userHandler.ref, options = Vector(SO.KeepAlive(true)))
 
       val clientChannel = connectionActor.underlyingActor.channel
-      clientChannel.getOption(StandardSocketOptions.SO_KEEPALIVE).booleanValue() must be(false) // only set after connection is established
+      clientChannel.socket.getKeepAlive must be(false) // only set after connection is established
       selector.send(connectionActor, ChannelConnectable)
-      clientChannel.getOption(StandardSocketOptions.SO_KEEPALIVE).booleanValue() must be(true)
+      clientChannel.socket.getKeepAlive must be(true)
     }
 
     "send incoming data to user" in withEstablishedConnection() { setup ⇒
@@ -128,7 +128,7 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") {
         object Ack2
 
         //serverSideChannel.configureBlocking(false)
-        clientSideChannel.setOption(StandardSocketOptions.SO_SNDBUF, 1024: Integer)
+        clientSideChannel.socket.setSendBufferSize(1024)
 
         // producing backpressure by sending much more than currently fits into
         // our send buffer
@@ -176,7 +176,7 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") {
       object Ack
       // set an artificially small send buffer size so that the write is queued
       // inside the connection actor
-      clientSideChannel.setOption(StandardSocketOptions.SO_SNDBUF, 1024: Integer)
+      clientSideChannel.socket.setSendBufferSize(1024)
 
       // we send a write and a close command directly afterwards
       connectionHandler.send(connectionActor, writeCmd(Ack))
@@ -210,7 +210,7 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") {
       object Ack
       // set an artificially small send buffer size so that the write is queued
       // inside the connection actor
-      clientSideChannel.setOption(StandardSocketOptions.SO_SNDBUF, 1024: Integer)
+      clientSideChannel.socket.setSendBufferSize(1024)
 
       // we send a write and a close command directly afterwards
       connectionHandler.send(connectionActor, writeCmd(Ack))
@@ -232,7 +232,7 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") {
       connectionActor.isTerminated must be(true)
     }
 
-    "peer closed the connection" in withEstablishedConnection() { setup ⇒
+    "report when peer closed the connection" in withEstablishedConnection() { setup ⇒
       import setup._
 
       serverSideChannel.close()
@@ -241,11 +241,10 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") {
       connectionHandler.expectMsg(PeerClosed)
       connectionActor.isTerminated must be(true)
     }
-    "peer aborted the connection" in withEstablishedConnection() { setup ⇒
+    "report when peer aborted the connection" in withEstablishedConnection() { setup ⇒
       import setup._
 
-      serverSideChannel.setOption(StandardSocketOptions.SO_LINGER, 0: Integer)
-      serverSideChannel.close()
+      abort(serverSideChannel)
 
       selector.send(connectionActor, ChannelReadable)
       connectionHandler.expectMsgPF(remaining) {
@@ -257,11 +256,10 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") {
       clientSideChannel.isOpen must be(false)
       connectionActor.isTerminated must be(true)
     }
-    "peer closed the connection when trying to write" in withEstablishedConnection() { setup ⇒
+    "report when peer closed the connection when trying to write" in withEstablishedConnection() { setup ⇒
       import setup._
 
-      serverSideChannel.setOption(StandardSocketOptions.SO_LINGER, 0: Integer)
-      serverSideChannel.close()
+      abort(serverSideChannel)
 
       connectionHandler.send(connectionActor, Write(ByteString("testdata")))
 
@@ -325,7 +323,7 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") {
       localServer.accept()
       selector.send(connectionActor, ChannelConnectable)
 
-      userHandler.expectMsg(Connected(clientSideChannel.getLocalAddress.asInstanceOf[InetSocketAddress], serverAddress))
+      userHandler.expectMsg(Connected(clientSideChannel.socket.getLocalSocketAddress.asInstanceOf[InetSocketAddress], serverAddress))
 
       watcher.expectMsgPF(1500.millis) {
         case Terminated(`connectionActor`) ⇒
@@ -372,7 +370,7 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") {
     val localServer = ServerSocketChannel.open()
     try {
       setServerSocketOptions(localServer)
-      localServer.bind(serverAddress)
+      localServer.socket.bind(serverAddress)
       localServer.configureBlocking(false)
       body(localServer)
     } finally localServer.close()
@@ -418,7 +416,7 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") {
     val serverSideChannel = localServer.accept()
     selector.send(connectionActor, ChannelConnectable)
 
-    userHandler.expectMsg(Connected(clientSideChannel.getLocalAddress.asInstanceOf[InetSocketAddress], serverAddress))
+    userHandler.expectMsg(Connected(clientSideChannel.socket.getLocalSocketAddress.asInstanceOf[InetSocketAddress], serverAddress))
 
     userHandler.send(connectionActor, Register(connectionHandler.ref))
 
@@ -440,7 +438,7 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") {
     Write(ByteString(Array.fill[Byte](TestSize)(0)), ack)
 
   def setSmallRcvBuffer(channel: ServerSocketChannel) =
-    channel.setOption(StandardSocketOptions.SO_RCVBUF, 1024: Integer)
+    channel.socket.setReceiveBufferSize(1024)
 
   def createConnectionActor(
     selector: ActorRef,
@@ -461,5 +459,10 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 1s") {
           context.stop(self)
         }
       })
+  }
+
+  def abort(channel: SocketChannel) {
+    channel.socket.setSoLinger(true, 0)
+    channel.close()
   }
 }
