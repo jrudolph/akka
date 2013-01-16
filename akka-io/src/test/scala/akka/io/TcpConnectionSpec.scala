@@ -346,7 +346,7 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 500ms")
       val connectionActor = connectionActorCons(selector.ref, userHandler.ref)
       val clientSideChannel = connectionActor.underlyingActor.channel
 
-      selector.expectMsg(RegisterClientChannel(clientSideChannel))
+      selector.expectMsg(RegisterOutgoingConnection(clientSideChannel))
 
       body {
         UnacceptedSetup(
