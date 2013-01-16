@@ -23,6 +23,7 @@ abstract class TcpConnection(val selector: ActorRef,
   channel.configureBlocking(false)
 
   var pendingWrite: Write = Write.Empty // a write "queue" of size 1 for holding one unfinished write command
+  var pendingWriteCommander: ActorRef = null
   def writePending = pendingWrite ne Write.Empty
 
   def registerTimeout = Tcp(context.system).Settings.RegisterTimeout
@@ -58,9 +59,11 @@ abstract class TcpConnection(val selector: ActorRef,
 
     case write: Write if writePending ⇒
       log.debug("Dropping write because queue is full")
-      handler ! CommandFailed(write)
+      sender ! CommandFailed(write)
 
-    case write: Write      ⇒ doWrite(handler, write)
+    case write: Write ⇒
+      pendingWriteCommander = sender
+      doWrite(handler, write)
     case ChannelWritable   ⇒ doWrite(handler, pendingWrite)
 
     case cmd: CloseCommand ⇒ handleClose(handler, closeResponse(cmd))
@@ -144,7 +147,10 @@ abstract class TcpConnection(val selector: ActorRef,
       pendingWrite = consume(write, writtenBytes)
 
       if (writePending) selector ! WriteInterest // still data to write
-      else if (write.ack != null) handler ! write.ack // everything written
+      else if (write.ack != null) {
+        pendingWriteCommander ! write.ack
+        pendingWriteCommander = null
+      } // everything written
     } catch {
       case e: IOException ⇒ handleError(handler, e)
     }

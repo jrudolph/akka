@@ -68,14 +68,17 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 500ms")
     "write data to network (and acknowledge)" in withEstablishedConnection() { setup ⇒
       import setup._
       serverSideChannel.configureBlocking(false)
+
+      val writer = TestProbe()
+
       object Ack
       val write = Write(ByteString("testdata"), Ack)
       val buffer = ByteBuffer.allocate(100)
       serverSideChannel.read(buffer) must be(0)
 
-      // emulate selector behavior
-      connectionHandler.send(connectionActor, write)
-      connectionHandler.expectMsg(Ack)
+      writer.send(connectionActor, write)
+      // make sure the writer gets the ack
+      writer.expectMsg(Ack)
       serverSideChannel.read(buffer) must be(8)
       buffer.flip()
       ByteString(buffer).take(8).decodeString("ASCII") must be("testdata")
@@ -90,6 +93,8 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 500ms")
         //serverSideChannel.configureBlocking(false)
         clientSideChannel.socket.setSendBufferSize(1024)
 
+        val writer = TestProbe()
+
         // producing backpressure by sending much more than currently fits into
         // our send buffer
         val firstWrite = writeCmd(Ack1)
@@ -97,14 +102,14 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 500ms")
         // try to write the buffer but since the SO_SNDBUF is too small
         // it will have to keep the rest of the piece and send it
         // when possible
-        connectionHandler.send(connectionActor, firstWrite)
+        writer.send(connectionActor, firstWrite)
         selector.expectMsg(WriteInterest)
 
         // send another write which should fail immediately
         // because we don't store more than one piece in flight
         val secondWrite = writeCmd(Ack2)
-        connectionHandler.send(connectionActor, secondWrite)
-        connectionHandler.expectMsg(CommandFailed(secondWrite))
+        writer.send(connectionActor, secondWrite)
+        writer.expectMsg(CommandFailed(secondWrite))
 
         // there will be immediately more space in the send buffer because
         // some data will have been sent by now, so we assume we can write
@@ -114,7 +119,7 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 500ms")
         // both buffers should now be filled so no more writing
         // is possible
         setup.pullFromServerSide(TestSize)
-        connectionHandler.expectMsg(Ack1)
+        writer.expectMsg(Ack1)
       }
 
     "respect StopReading and ResumeReading" in withEstablishedConnection() { setup ⇒
