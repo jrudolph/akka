@@ -146,14 +146,11 @@ object Tcp extends ExtensionKey[TcpExt] {
 
   case class Write(data: ByteString, ack: AnyRef) extends Command
   object Write {
-    def empty: Write = EmptyWrite
+    val Empty: Write = Write(ByteString.empty, null)
 
     def apply(_data: ByteString): Write =
-      if (_data.isEmpty) empty
+      if (_data.isEmpty) Empty
       else Write(_data, null)
-
-    /** The EmptyWrite, we use this in TcpBaseConnection as a marker for the empty write queue */
-    private[io] object EmptyWrite extends Write(ByteString.empty, null)
   }
 
   case object StopReading extends Command

@@ -20,8 +20,8 @@ trait TcpBaseConnection extends Actor with WithDirectBuffer { _: Actor with Acto
   def selector: ActorRef
 
   /** a write queue of size 1 to contain one unfinished write command */
-  var remainingWrite: Write = Write.EmptyWrite
-  def currentlyWriting = remainingWrite != Write.EmptyWrite
+  var remainingWrite: Write = Write.Empty
+  def currentlyWriting = remainingWrite ne Write.Empty
 
   // STATES
 
@@ -209,11 +209,11 @@ trait TcpBaseConnection extends Actor with WithDirectBuffer { _: Actor with Acto
 
   /** Returns a new write with `numBytes` removed from the front */
   def consume(write: Write, numBytes: Int): Write = write match {
-    case Write.EmptyWrite if numBytes == 0 ⇒ write
+    case Write.Empty if numBytes == 0 ⇒ write
     case _ ⇒
       numBytes match {
         case 0                           ⇒ write
-        case x if x == write.data.length ⇒ Write.empty
+        case x if x == write.data.length ⇒ Write.Empty
         case _ ⇒
           require(numBytes > 0 && numBytes < write.data.length)
           write.copy(data = write.data.drop(numBytes))
