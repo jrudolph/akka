@@ -65,7 +65,7 @@ trait TcpBaseConnection extends Actor with WithDirectBuffer { _: Actor with Acto
     case ChannelWritable ⇒
       doWrite(handler, remainingWrite)
 
-      if (!currentlyWriting) // write is now finished
+      if (!currentlyWriting) // writing is now finished
         handleClose(handler, closedEvent)
 
     case Abort ⇒ handleClose(handler, Aborted)
@@ -106,9 +106,11 @@ trait TcpBaseConnection extends Actor with WithDirectBuffer { _: Actor with Acto
 
         handler ! Received(ByteString(buffer).take(read))
 
-        // try reading more
-        // FIXME: loop here directly? if yes, how often?
-        self ! ChannelReadable
+        if (read == buffer.capacity())
+          // directly try reading more because we exhausted our buffer
+          self ! ChannelReadable
+        else selector ! ReadInterest
+
       } else if (read == 0) {
         log.debug("Read returned nothing. Registering read interest with selector", read)
 
@@ -138,18 +140,10 @@ trait TcpBaseConnection extends Actor with WithDirectBuffer { _: Actor with Acto
       log.debug("Wrote {} bytes", writtenBytes)
 
       remainingWrite = consume(write, writtenBytes)
-      if (!currentlyWriting && write.ack != null)
-        handler ! write.ack
 
-      // TODO: a possible optimization could be to try to send ourselves another
-      // ChannelWritable now or soon after so we can avoid having to use the selector
-      // in many cases. The downside is possibly spinning with low write rates.
-      // if (currentlyWriting && wrote > 0)
-      //   self ! ChannelWritable
-      // else
+      if (currentlyWriting) selector ! WriteInterest // still data to write
+      else if (write.ack != null) handler ! write.ack // everything written
 
-      if (currentlyWriting) // still data to write
-        selector ! WriteInterest
     } catch {
       case e: IOException ⇒
         handleError(handler, e)
