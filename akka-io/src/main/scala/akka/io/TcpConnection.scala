@@ -115,7 +115,7 @@ abstract class TcpConnection(val selector: ActorRef,
 
       if (readBytes > 0) {
         log.debug("Read {} bytes", readBytes)
-        handler ! Received(ByteString(buffer).take(readBytes))
+        handler ! Received(ByteString(buffer))
         if (readBytes == buffer.capacity())
           // directly try reading more because we exhausted our buffer
           self ! ChannelReadable
