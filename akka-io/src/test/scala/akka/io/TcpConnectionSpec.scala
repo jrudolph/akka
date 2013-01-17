@@ -14,7 +14,7 @@ import java.net._
 import scala.collection.immutable
 import scala.concurrent.duration._
 import scala.util.control.NonFatal
-import akka.actor.{ ActorRef, Terminated }
+import akka.actor.{ PoisonPill, ActorRef, Terminated }
 import akka.testkit.{ TestProbe, TestActorRef, AkkaSpec }
 import akka.util.ByteString
 import Tcp._
@@ -274,8 +274,7 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 500ms")
     "close the connection when user handler dies while connecting" in withUnacceptedConnection() { setup ⇒
       import setup._
 
-      // simulate death of userHandler test probe
-      userHandler.send(connectionActor, akka.actor.Terminated(userHandler.ref)(false, false))
+      userHandler.ref ! PoisonPill
 
       assertActorTerminated(connectionActor)
     }
