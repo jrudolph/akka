@@ -45,8 +45,8 @@ abstract class TcpConnection(val selector: ActorRef,
       handleClose(commander, closeResponse(cmd))
 
     case ReceiveTimeout ⇒
-      // TODO: just shutting down, as we do here, presents a race condition to the user
-      // Should we introduce a dedicated `Registered` event message to notify the user of successful registration?
+      // after sending `Register` user should watch this actor to make sure
+      // it didn't die because of the timeout
       log.warning("Configured registration timeout of {} expired, stopping", registerTimeout)
       context.stop(self)
   }
