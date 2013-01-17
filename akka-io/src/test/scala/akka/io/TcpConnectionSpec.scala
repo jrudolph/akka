@@ -69,9 +69,13 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 500ms")
       import setup._
       serverSideChannel.configureBlocking(false)
 
+      object Ack
       val writer = TestProbe()
 
-      object Ack
+      // directly acknowledge an empty write
+      writer.send(connectionActor, Write(ByteString.empty, Ack))
+      writer.expectMsg(Ack)
+
       val write = Write(ByteString("testdata"), Ack)
       val buffer = ByteBuffer.allocate(100)
       serverSideChannel.read(buffer) must be(0)
@@ -110,6 +114,10 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 500ms")
         val secondWrite = writeCmd(Ack2)
         writer.send(connectionActor, secondWrite)
         writer.expectMsg(CommandFailed(secondWrite))
+
+        // reject even empty writes
+        writer.send(connectionActor, Write.Empty)
+        writer.expectMsg(CommandFailed(Write.Empty))
 
         // there will be immediately more space in the send buffer because
         // some data will have been sent by now, so we assume we can write

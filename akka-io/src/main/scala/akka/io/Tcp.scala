@@ -160,6 +160,8 @@ object Tcp extends ExtensionKey[TcpExt] {
    */
   case class Write(data: ByteString, ack: AnyRef) extends Command {
     require(ack ne null, "ack must be non-null. Use NoAck if you don't want acks.")
+
+    def wantsAck: Boolean = ack ne NoAck
   }
   object Write {
     val Empty: Write = Write(ByteString.empty, NoAck)

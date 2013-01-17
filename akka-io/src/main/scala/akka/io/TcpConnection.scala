@@ -61,6 +61,10 @@ abstract class TcpConnection(val selector: ActorRef,
       log.debug("Dropping write because queue is full")
       sender ! CommandFailed(write)
 
+    case write: Write if write.data.isEmpty ⇒
+      if (write.wantsAck)
+        sender ! write.ack
+
     case write: Write ⇒
       pendingWriteCommander = sender
       doWrite(handler, write)
@@ -147,7 +151,7 @@ abstract class TcpConnection(val selector: ActorRef,
       pendingWrite = consume(write, writtenBytes)
 
       if (writePending) selector ! WriteInterest // still data to write
-      else if (write.ack ne NoAck) {
+      else if (write.wantsAck) {
         pendingWriteCommander ! write.ack
         pendingWriteCommander = null
       } // everything written
