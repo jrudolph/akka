@@ -67,8 +67,9 @@ abstract class TcpConnection(val selector: ActorRef,
 
     case write: Write ⇒
       pendingWriteCommander = sender
-      doWrite(handler, write)
-    case ChannelWritable   ⇒ doWrite(handler, pendingWrite)
+      pendingWrite = write
+      doWrite(handler)
+    case ChannelWritable   ⇒ doWrite(handler)
 
     case cmd: CloseCommand ⇒ handleClose(handler, closeResponse(cmd))
   }
@@ -80,7 +81,7 @@ abstract class TcpConnection(val selector: ActorRef,
     case ChannelReadable ⇒ doRead(handler)
 
     case ChannelWritable ⇒
-      doWrite(handler, pendingWrite)
+      doWrite(handler)
       if (!writePending) // writing is now finished
         handleClose(handler, closedEvent)
 
@@ -137,7 +138,8 @@ abstract class TcpConnection(val selector: ActorRef,
     }
   }
 
-  def doWrite(handler: ActorRef, write: Write): Unit = {
+  def doWrite(handler: ActorRef): Unit = {
+    val write = pendingWrite
     val data = write.data
 
     val buffer = directBuffer()
@@ -187,7 +189,10 @@ abstract class TcpConnection(val selector: ActorRef,
     if (closedEvent == Aborted) abort()
     else channel.close()
 
+    if (writePending)
+      pendingWriteCommander ! closedEvent
     handler ! closedEvent
+
     context.stop(self)
   }
 
@@ -200,7 +205,12 @@ abstract class TcpConnection(val selector: ActorRef,
 
   def handleError(handler: ActorRef, exception: IOException): Unit = {
     exception.setStackTrace(Array.empty)
-    handler ! ErrorClose(exception)
+    val close = ErrorClose(exception)
+
+    if (writePending)
+      pendingWriteCommander ! close
+    handler ! close
+
     throw exception
   }
 

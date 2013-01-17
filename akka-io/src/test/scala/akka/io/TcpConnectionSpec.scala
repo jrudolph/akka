@@ -231,9 +231,14 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 500ms")
     "report when peer closed the connection when trying to write" in withEstablishedConnection() { setup ⇒
       import setup._
 
+      val writer = TestProbe()
+
       abortClose(serverSideChannel)
-      connectionHandler.send(connectionActor, Write(ByteString("testdata")))
-      connectionHandler.expectMsgPF(remaining) {
+      writer.send(connectionActor, Write(ByteString("testdata")))
+      writer.expectMsgPF() {
+        case ErrorClose(_: IOException) ⇒ // ok
+      }
+      connectionHandler.expectMsgPF() {
         case ErrorClose(_: IOException) ⇒ // ok
       }
 
