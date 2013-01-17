@@ -13,6 +13,7 @@ import scala.concurrent.duration._
 import akka.actor._
 import akka.util.ByteString
 import Tcp._
+import annotation.tailrec
 
 /**
  * Base class for TcpIncomingConnection and TcpOutgoingConnection.
@@ -204,8 +205,7 @@ abstract class TcpConnection(val selector: ActorRef,
     }
 
   def handleError(handler: ActorRef, exception: IOException): Unit = {
-    exception.setStackTrace(Array.empty)
-    val close = ErrorClose(exception)
+    val close = ErrorClose(extractMsg(exception))
 
     if (writePending)
       pendingWriteCommander ! close
@@ -213,6 +213,14 @@ abstract class TcpConnection(val selector: ActorRef,
 
     throw exception
   }
+  @tailrec private[this] def extractMsg(t: Throwable): String =
+    if (t == null) "unknown"
+    else {
+      t.getMessage match {
+        case null | "" ⇒ extractMsg(t.getCause)
+        case msg       ⇒ msg
+      }
+    }
 
   def abort(): Unit = {
     try channel.socket.setSoLinger(true, 0) // causes the following close() to send TCP RST

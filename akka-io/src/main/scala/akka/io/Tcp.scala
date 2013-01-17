@@ -188,7 +188,7 @@ object Tcp extends ExtensionKey[TcpExt] {
   case object Aborted extends ConnectionClosed
   case object ConfirmedClosed extends ConnectionClosed
   case object PeerClosed extends ConnectionClosed
-  case class ErrorClose(cause: Throwable) extends ConnectionClosed
+  case class ErrorClose(cause: String) extends ConnectionClosed
 
   /// INTERNAL
   case class RegisterOutgoingConnection(channel: SocketChannel)
