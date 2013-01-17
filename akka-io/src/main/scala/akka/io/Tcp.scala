@@ -152,11 +152,19 @@ object Tcp extends ExtensionKey[TcpExt] {
   case object ConfirmedClose extends CloseCommand
   case object Abort extends CloseCommand
 
-  case class Write(data: ByteString, ack: AnyRef) extends Command
+  case object NoAck
+
+  /**
+   * Write data to the TCP connection. If no ack is needed use the special
+   * `NoAck` object.
+   */
+  case class Write(data: ByteString, ack: AnyRef) extends Command {
+    require(ack ne null, "ack must be non-null. Use NoAck if you don't want acks.")
+  }
   object Write {
-    val Empty: Write = Write(ByteString.empty, null)
+    val Empty: Write = Write(ByteString.empty, NoAck)
     def apply(data: ByteString): Write =
-      if (data.isEmpty) Empty else Write(data, null)
+      if (data.isEmpty) Empty else Write(data, NoAck)
   }
 
   case object StopReading extends Command

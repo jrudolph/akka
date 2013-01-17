@@ -147,7 +147,7 @@ abstract class TcpConnection(val selector: ActorRef,
       pendingWrite = consume(write, writtenBytes)
 
       if (writePending) selector ! WriteInterest // still data to write
-      else if (write.ack != null) {
+      else if (write.ack ne NoAck) {
         pendingWriteCommander ! write.ack
         pendingWriteCommander = null
       } // everything written
