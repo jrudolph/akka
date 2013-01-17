@@ -226,6 +226,7 @@ class TcpExt(system: ExtendedActorSystem) extends IO.Extension {
     val SelectorDispatcher = getString("selector-dispatcher")
     val WorkerDispatcher = getString("worker-dispatcher")
     val ManagementDispatcher = getString("management-dispatcher")
+    val TraceLogging = getBoolean("trace-logging")
 
     require(NrOfSelectors > 0, "nr-of-selectors must be > 0")
     require(MaxChannels >= 0, "max-channels must be >= 0")
