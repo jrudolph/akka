@@ -427,7 +427,8 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 500ms")
     channel.close()
   }
   def assertActorTerminated(connectionActor: TestActorRef[TcpOutgoingConnection]): Unit = {
-    watch(connectionActor)
-    expectMsgType[Terminated].actor must be(connectionActor)
+    val watcher = TestProbe()
+    watcher.watch(connectionActor)
+    watcher.expectMsgType[Terminated].actor must be(connectionActor)
   }
 }
