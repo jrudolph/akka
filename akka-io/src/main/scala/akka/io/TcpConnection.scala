@@ -187,12 +187,14 @@ abstract class TcpConnection(val selector: ActorRef,
     }
 
   def doCloseConnection(handler: ActorRef, closedEvent: ConnectionClosed): Unit = {
-    if (closedEvent == Aborted) abort()
-    else channel.close()
-
-    if (writePending)
-      pendingWriteCommander ! closedEvent
-    handler ! closedEvent
+    try {
+      if (closedEvent == Aborted) abort()
+      else channel.close()
+    } finally {
+      if (writePending)
+        pendingWriteCommander ! closedEvent
+      handler ! closedEvent
+    }
 
     context.stop(self)
   }
