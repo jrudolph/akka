@@ -234,15 +234,11 @@ abstract class TcpConnection(val selector: ActorRef,
 
   /** Returns a new write with `numBytes` removed from the front */
   def consume(write: Write, numBytes: Int): Write =
-    write match {
-      case Write.Empty if numBytes == 0 ⇒ write
+    numBytes match {
+      case 0                           ⇒ write
+      case x if x == write.data.length ⇒ Write.Empty
       case _ ⇒
-        numBytes match {
-          case 0                           ⇒ write
-          case x if x == write.data.length ⇒ Write.Empty
-          case _ ⇒
-            require(numBytes > 0 && numBytes < write.data.length)
-            write.copy(data = write.data.drop(numBytes))
-        }
+        require(numBytes > 0 && numBytes < write.data.length)
+        write.copy(data = write.data.drop(numBytes))
     }
 }
