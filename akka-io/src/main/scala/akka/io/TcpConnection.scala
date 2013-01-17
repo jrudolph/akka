@@ -25,6 +25,11 @@ abstract class TcpConnection(val selector: ActorRef,
 
   var pendingWrite: Write = Write.Empty // a write "queue" of size 1 for holding one unfinished write command
   var pendingWriteCommander: ActorRef = null
+
+  // Needed to send the ConnectionClosed message in the postStop handler.
+  // First element is the handler, second the particular close message.
+  var closedMessage: (ActorRef, ConnectionClosed) = null
+
   def writePending = pendingWrite ne Write.Empty
 
   def registerTimeout = Tcp(context.system).Settings.RegisterTimeout
@@ -187,14 +192,10 @@ abstract class TcpConnection(val selector: ActorRef,
     }
 
   def doCloseConnection(handler: ActorRef, closedEvent: ConnectionClosed): Unit = {
-    try {
-      if (closedEvent == Aborted) abort()
-      else channel.close()
-    } finally {
-      if (writePending)
-        pendingWriteCommander ! closedEvent
-      handler ! closedEvent
-    }
+    if (closedEvent == Aborted) abort()
+    else channel.close()
+
+    closedMessage = (handler, closedEvent)
 
     context.stop(self)
   }
@@ -207,11 +208,7 @@ abstract class TcpConnection(val selector: ActorRef,
     }
 
   def handleError(handler: ActorRef, exception: IOException): Unit = {
-    val close = ErrorClose(extractMsg(exception))
-
-    if (writePending)
-      pendingWriteCommander ! close
-    handler ! close
+    closedMessage = (handler, ErrorClose(extractMsg(exception)))
 
     throw exception
   }
@@ -235,9 +232,18 @@ abstract class TcpConnection(val selector: ActorRef,
     channel.close()
   }
 
-  override def postStop(): Unit =
+  override def postStop(): Unit = {
+    if (closedMessage != null) {
+      val msg = closedMessage._2
+      closedMessage._1 ! msg
+
+      if (writePending)
+        pendingWriteCommander ! msg
+    }
+
     if (channel.isOpen)
       abort()
+  }
 
   override def postRestart(reason: Throwable): Unit =
     throw new IllegalStateException("Restarting not supported for connection actors.")
