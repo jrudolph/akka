@@ -53,16 +53,12 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 500ms")
       serverSideChannel.write(ByteBuffer.wrap("testdata".getBytes("ASCII")))
       // emulate selector behavior
       selector.send(connectionActor, ChannelReadable)
-      connectionHandler.expectMsgPF(remaining) {
-        case Received(data) if data.decodeString("ASCII") == "testdata" ⇒
-      }
+      connectionHandler.expectMsgType[Received].data.decodeString("ASCII") must be("testdata")
       // have two packets in flight before the selector notices
       serverSideChannel.write(ByteBuffer.wrap("testdata2".getBytes("ASCII")))
       serverSideChannel.write(ByteBuffer.wrap("testdata3".getBytes("ASCII")))
       selector.send(connectionActor, ChannelReadable)
-      connectionHandler.expectMsgPF(remaining) {
-        case Received(data) if data.decodeString("ASCII") == "testdata2testdata3" ⇒
-      }
+      connectionHandler.expectMsgType[Received].data.decodeString("ASCII") must be("testdata2testdata3")
     }
 
     "write data to network (and acknowledge)" in withEstablishedConnection() { setup ⇒
@@ -220,9 +216,7 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 500ms")
 
       abortClose(serverSideChannel)
       selector.send(connectionActor, ChannelReadable)
-      connectionHandler.expectMsgPF(remaining) {
-        case ErrorClose(exc: IOException) ⇒ exc.getMessage must be("Connection reset by peer")
-      }
+      connectionHandler.expectMsgType[ErrorClose].cause.getMessage must be("Connection reset by peer")
       // wait a while
       connectionHandler.expectNoMsg(200.millis)
 
@@ -252,9 +246,7 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 500ms")
       localServer.close()
 
       selector.send(connectionActor, ChannelConnectable)
-      userHandler.expectMsgPF() {
-        case ErrorClose(e) ⇒ e.getMessage must be("Connection reset by peer")
-      }
+      userHandler.expectMsgType[ErrorClose].cause.getMessage must be("Connection reset by peer")
 
       assertActorTerminated(connectionActor)
     }
@@ -270,9 +262,7 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 500ms")
 
         key.isConnectable must be(true)
         selector.send(connectionActor, ChannelConnectable)
-        userHandler.expectMsgPF() {
-          case ErrorClose(e) ⇒ e.getMessage must be("Connection refused")
-        }
+        userHandler.expectMsgType[ErrorClose].cause.getMessage must be("Connection refused")
 
         assertActorTerminated(connectionActor)
       }
