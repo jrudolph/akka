@@ -153,7 +153,7 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 500ms")
       setup.pullFromServerSide(TestSize)
       connectionHandler.expectMsg(Ack)
       connectionHandler.expectMsg(Closed)
-      connectionActor.isTerminated must be(true)
+      assertThisConnectionActorTerminated()
 
       val buffer = ByteBuffer.allocate(1)
       serverSideChannel.read(buffer) must be(-1)
