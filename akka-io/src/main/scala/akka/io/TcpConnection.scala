@@ -219,6 +219,9 @@ abstract class TcpConnection(val selector: ActorRef,
     if (channel.isOpen)
       abort()
 
+  override def postRestart(reason: Throwable): Unit =
+    throw new IllegalStateException("Restarting not supported for connection actors.")
+
   /** Returns a new write with `numBytes` removed from the front */
   def consume(write: Write, numBytes: Int): Write =
     write match {
