@@ -122,7 +122,7 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 500ms")
 
         // both buffers should now be filled so no more writing
         // is possible
-        setup.pullFromServerSide(TestSize)
+        pullFromServerSide(TestSize)
         writer.expectMsg(Ack1)
       }
 
@@ -150,7 +150,7 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 500ms")
       connectionHandler.send(connectionActor, writeCmd(Ack))
       connectionHandler.send(connectionActor, Close)
 
-      setup.pullFromServerSide(TestSize)
+      pullFromServerSide(TestSize)
       connectionHandler.expectMsg(Ack)
       connectionHandler.expectMsg(Closed)
       assertThisConnectionActorTerminated()
@@ -186,7 +186,7 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 500ms")
       connectionHandler.send(connectionActor, ConfirmedClose)
 
       connectionHandler.expectNoMsg(100.millis)
-      setup.pullFromServerSide(TestSize)
+      pullFromServerSide(TestSize)
       connectionHandler.expectMsg(Ack)
 
       selector.send(connectionActor, ChannelReadable)
