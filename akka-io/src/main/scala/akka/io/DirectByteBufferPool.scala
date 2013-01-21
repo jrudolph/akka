@@ -30,7 +30,7 @@ trait BufferPool {
 private[akka] class DirectByteBufferPool(defaultBufferSize: Int, maxPoolEntries: Int) extends BufferPool {
   private[this] val locked = new AtomicBoolean(false)
   private[this] val pool: Array[SoftReference[ByteBuffer]] = new Array[SoftReference[ByteBuffer]](maxPoolEntries)
-  @volatile private[this] var buffersInPool: Int = 0
+  private[this] var buffersInPool: Int = 0
 
   def acquire(): ByteBuffer = {
     val buffer = takeBufferFromPool()
