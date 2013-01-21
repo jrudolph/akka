@@ -241,5 +241,5 @@ class TcpExt(system: ExtendedActorSystem) extends IO.Extension {
   val manager = system.asInstanceOf[ActorSystemImpl].systemActorOf(
     Props.empty.withDispatcher(Settings.ManagementDispatcher), "IO-TCP")
 
-  val bufferPool = new DirectByteBufferPool(Settings.DirectBufferSize, Settings.MaxDirectBufferPoolSize)
+  val bufferPool: BufferPool = new DirectByteBufferPool(Settings.DirectBufferSize, Settings.MaxDirectBufferPoolSize)
 }

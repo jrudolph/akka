@@ -1,6 +1,6 @@
 package akka.io
 
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicBoolean
 import java.nio.ByteBuffer
 import annotation.tailrec
 
@@ -10,58 +10,62 @@ trait WithBufferPool {
   def acquireBuffer(): ByteBuffer =
     tcp.bufferPool.acquire()
 
-  def acquireBuffer(size: Int): ByteBuffer =
-    tcp.bufferPool.acquire(size)
-
   def releaseBuffer(buffer: ByteBuffer) =
     tcp.bufferPool.release(buffer)
 }
 
+trait BufferPool {
+  def acquire(): ByteBuffer
+  def release(buf: ByteBuffer): Unit
+}
+
 /**
- * A buffer pool which keeps direct buffers of a specified default size.
- * If a buffer bigger than the default size is requested it is created
- * but will not be pooled on release.
+ * A buffer pool which keeps a free list of direct buffers of a specified default
+ * size in a simple fixed size stack.
  *
- * This implementation is very loosely based on the one from Netty.
+ * If the stack is full a buffer offered back is not kept but will be let for
+ * being freed by normal garbage collection.
  */
-class DirectByteBufferPool(bufferSize: Int, maxPoolSize: Int) {
-  private val Unlocked = 0
-  private val Locked = 1
+private[akka] class DirectByteBufferPool(defaultBufferSize: Int, maxPoolEntries: Int) extends BufferPool {
+  private[this] val locked = new AtomicBoolean(false)
+  private[this] val pool: Array[ByteBuffer] = new Array[ByteBuffer](maxPoolEntries)
+  @volatile private[this] var buffersInPool: Int = 0
 
-  private[this] val state = new AtomicInteger(Unlocked)
-  @volatile private[this] var pool: List[ByteBuffer] = Nil
-  @volatile private[this] var poolSize: Int = 0
-
-  private[this] def allocate(size: Int): ByteBuffer =
-    ByteBuffer.allocateDirect(size)
-
-  def acquire(size: Int = bufferSize): ByteBuffer = {
-    if (poolSize == 0 || size > bufferSize) allocate(size)
-    else takeBufferFromPool()
-  }
+  def acquire(): ByteBuffer =
+    takeBufferFromPool()
 
   def release(buf: ByteBuffer): Unit =
-    if (buf.capacity() <= bufferSize && poolSize < maxPoolSize)
-      addBufferToPool(buf)
+    offerBufferToPool(buf)
+
+  private def allocate(size: Int): ByteBuffer =
+    ByteBuffer.allocateDirect(size)
 
   @tailrec
-  final def takeBufferFromPool(): ByteBuffer =
-    if (state.compareAndSet(Unlocked, Locked))
-      try pool match {
-        case Nil ⇒ allocate(bufferSize) // we have no more buffer available, so create a new one
-        case buf :: tail ⇒
-          pool = tail
-          poolSize -= 1
-          buf
-      } finally state.set(Unlocked)
-    else takeBufferFromPool() // spin while locked
+  private final def takeBufferFromPool(): ByteBuffer =
+    if (locked.compareAndSet(false, true)) {
+      val buffer =
+        try if (buffersInPool > 0) {
+          buffersInPool -= 1
+          pool(buffersInPool)
+        } else null
+        finally locked.set(false)
+
+      // allocate new and clear outside the lock
+      if (buffer == null)
+        allocate(defaultBufferSize)
+      else {
+        buffer.clear()
+        buffer
+      }
+    } else takeBufferFromPool() // spin while locked
 
   @tailrec
-  final def addBufferToPool(buf: ByteBuffer): Unit =
-    if (state.compareAndSet(Unlocked, Locked)) {
-      buf.clear() // ensure that we never have dirty buffers in the pool
-      pool = buf :: pool
-      poolSize += 1
-      state.set(Unlocked)
-    } else addBufferToPool(buf) // spin while locked
+  private final def offerBufferToPool(buf: ByteBuffer): Unit =
+    if (locked.compareAndSet(false, true))
+      try if (buffersInPool < maxPoolEntries) {
+        pool(buffersInPool) = buf
+        buffersInPool += 1
+      } // else let the buffer be gc'd
+      finally locked.set(false)
+    else offerBufferToPool(buf) // spin while locked
 }

@@ -147,20 +147,28 @@ abstract class TcpConnection(val selector: ActorRef,
     }
   }
 
-  def doWrite(handler: ActorRef): Unit = {
-    try {
+  final def doWrite(handler: ActorRef): Unit = {
+    @tailrec def innerWrite(): Unit = {
+      val toWrite = pendingWrite.buffer.remaining()
+      require(toWrite != 0)
       val writtenBytes = channel.write(pendingWrite.buffer)
       if (traceLoggingEnabled) log.debug("Wrote {} bytes to channel", writtenBytes)
 
-      if (pendingWrite.hasData) selector ! WriteInterest // still data to write
+      pendingWrite = pendingWrite.consume(writtenBytes)
+
+      val wroteCompleteBuffer = writtenBytes == toWrite
+      if (pendingWrite.hasData)
+        if (wroteCompleteBuffer) innerWrite() // try again now
+        else selector ! WriteInterest // try again later
       else if (pendingWrite.wantsAck) { // everything written
         pendingWrite.commander ! pendingWrite.ack
         releaseBuffer(pendingWrite.buffer)
         pendingWrite = null
       }
-    } catch {
-      case e: IOException ⇒ handleError(handler, e)
     }
+
+    try innerWrite()
+    catch { case e: IOException ⇒ handleError(handler, e) }
   }
 
   def closeReason =
@@ -243,15 +251,28 @@ abstract class TcpConnection(val selector: ActorRef,
   override def postRestart(reason: Throwable): Unit =
     throw new IllegalStateException("Restarting not supported for connection actors.")
 
-  private[TcpConnection] case class PendingWrite(commander: ActorRef, ack: AnyRef, buffer: ByteBuffer) {
-    def hasData = buffer.remaining() > 0
+  private[TcpConnection] case class PendingWrite(
+    commander: ActorRef,
+    ack: AnyRef,
+    remainingData: ByteString,
+    buffer: ByteBuffer) {
+
+    def consume(writtenBytes: Int): PendingWrite =
+      if (buffer.remaining() == 0) {
+        buffer.clear()
+        val copied = remainingData.copyToBuffer(buffer)
+        buffer.flip()
+        copy(remainingData = remainingData.drop(copied))
+      } else this
+
+    def hasData = buffer.remaining() > 0 || remainingData.size > 0
     def wantsAck = ack ne NoAck
   }
   def createWrite(write: Write): PendingWrite = {
-    val buffer = acquireBuffer(write.data.length)
-    write.data.copyToBuffer(buffer)
+    val buffer = acquireBuffer()
+    val copied = write.data.copyToBuffer(buffer)
     buffer.flip()
 
-    PendingWrite(sender, write.ack, buffer)
+    PendingWrite(sender, write.ack, write.data.drop(copied), buffer)
   }
 }
