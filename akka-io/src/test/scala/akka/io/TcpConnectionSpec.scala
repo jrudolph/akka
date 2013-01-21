@@ -84,7 +84,7 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 500ms")
       buffer.clear()
       serverSideChannel.read(buffer) must be(0)
       writer.send(connectionActor, unackedWrite)
-      writer.expectNoMsg()
+      writer.expectNoMsg(500.millis)
       serverSideChannel.read(buffer) must be(10)
       buffer.flip()
       ByteString(buffer).take(10).decodeString("ASCII") must be("morestuff!")
@@ -172,7 +172,7 @@ class TcpConnectionSpec extends AkkaSpec("akka.io.tcp.register-timeout = 500ms")
 
       connectionHandler.send(connectionActor, Close)
       connectionHandler.expectMsg(Closed)
-      connectionHandler.expectNoMsg()
+      connectionHandler.expectNoMsg(500.millis)
     }
 
     "abort the connection and reply with `Aborted` upong reception of an `Abort` command" in withEstablishedConnection() { setup ⇒
