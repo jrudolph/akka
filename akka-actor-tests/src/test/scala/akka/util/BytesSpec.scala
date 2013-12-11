@@ -9,6 +9,8 @@ import org.scalacheck.Gen._
 import org.scalacheck.Arbitrary._
 
 class BytesSpec extends WordSpec with MustMatchers with Checkers {
+  import BytesUtils._
+
   def genFileByte(min: Int, max: Int): Gen[Bytes] =
     for {
       n ← choose(min, max)
@@ -178,18 +180,19 @@ class BytesSpec extends WordSpec with MustMatchers with Checkers {
     data.copyToArray(array, sourceOffset, targetOffset, span)
     new String(array)
   }
+}
 
-  def writeAllText(text: String, file: File) = {
-    val fos = new FileOutputStream(file)
-    try fos.write(text.getBytes("utf8"))
-    finally fos.close()
-  }
-
+object BytesUtils {
   def withFileBytes[T](text: String = "Ken sent me!")(f: Bytes ⇒ T): T = {
     val file = File.createTempFile("akka-util_BytesSpec", ".txt")
     try {
       writeAllText(text, file)
       f(Bytes(file))
     } finally file.delete
+  }
+  def writeAllText(text: String, file: File) = {
+    val fos = new FileOutputStream(file)
+    try fos.write(text.getBytes("utf8"))
+    finally fos.close()
   }
 }

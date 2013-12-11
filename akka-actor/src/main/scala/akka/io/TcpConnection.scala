@@ -14,7 +14,7 @@ import scala.collection.immutable
 import scala.util.control.NonFatal
 import scala.concurrent.duration._
 import akka.actor._
-import akka.util.ByteString
+import akka.util._
 import akka.io.Inet.SocketOption
 import akka.io.Tcp._
 import akka.io.SelectionHandler._
@@ -125,7 +125,7 @@ private[io] abstract class TcpConnection(val tcp: TcpExt, val channel: SocketCha
         }
       }
 
-    case write: WriteCommand ⇒
+    case write: Write ⇒
       if (writingSuspended) {
         if (TraceLogging) log.debug("Dropping write because writing is suspended")
         sender ! write.failureMessage
@@ -324,26 +324,40 @@ private[io] abstract class TcpConnection(val tcp: TcpExt, val channel: SocketCha
   override def postRestart(reason: Throwable): Unit =
     throw new IllegalStateException("Restarting not supported for connection actors.")
 
-  def PendingWrite(commander: ActorRef, write: WriteCommand): PendingWrite = {
-    @tailrec def create(head: WriteCommand, tail: WriteCommand = Write.empty): PendingWrite =
-      head match {
-        case Write.empty                         ⇒ if (tail eq Write.empty) EmptyPendingWrite else create(tail)
-        case Write(data, ack) if data.nonEmpty   ⇒ PendingBufferWrite(commander, data, ack, tail)
-        case WriteFile(path, offset, count, ack) ⇒ PendingWriteFile(commander, path, offset, count, ack, tail)
-        case CompoundWrite(h, t)                 ⇒ create(h, t)
-        case x @ Write(_, ack) ⇒ // empty write with either an ACK or a non-standard NoACK
-          if (x.wantsAck) commander ! ack
-          create(tail)
+  /** Deconstructs `Write.data` into a lazy chain of PendingWrites */
+  def PendingWrite(commander: ActorRef, write: Write): PendingWrite = {
+    // the function that sends out the ack and returns the last pending write
+    val finish: () ⇒ PendingWrite =
+      if (write.wantsAck)
+        () ⇒ {
+          commander ! write.ack
+          EmptyPendingWrite
+        }
+      else TcpConnection.FinishWithEmptyPendingWrite
+    def create(bytes: CompactBytes, finish: () ⇒ PendingWrite): PendingWrite =
+      bytes match {
+        case ByteString.empty               ⇒ finish()
+        case data: ByteString               ⇒ PendingBufferWrite(commander, data, finish)
+        case FileBytes(path, offset, count) ⇒ PendingWriteFile(commander, path, offset, count, finish)
       }
-    create(write)
+    def createCompound(parts: Vector[CompactBytes]): PendingWrite =
+      parts match {
+        case Vector(h) ⇒ create(h, finish)
+        case h +: t    ⇒ create(h, () ⇒ createCompound(t))
+      }
+
+    write.data match {
+      case compact: CompactBytes ⇒ create(compact, finish)
+      case CompoundBytes(parts)  ⇒ createCompound(parts)
+    }
   }
 
-  def PendingBufferWrite(commander: ActorRef, data: ByteString, ack: Event, tail: WriteCommand): PendingBufferWrite = {
+  def PendingBufferWrite(commander: ActorRef, data: ByteString, continue: () ⇒ PendingWrite): PendingBufferWrite = {
     val buffer = bufferPool.acquire()
     try {
       val copied = data.copyToBuffer(buffer)
       buffer.flip()
-      new PendingBufferWrite(commander, data.drop(copied), ack, buffer, tail)
+      new PendingBufferWrite(commander, data.drop(copied), buffer, continue)
     } catch {
       case NonFatal(e) ⇒
         bufferPool.release(buffer)
@@ -354,9 +368,8 @@ private[io] abstract class TcpConnection(val tcp: TcpExt, val channel: SocketCha
   class PendingBufferWrite(
     val commander: ActorRef,
     remainingData: ByteString,
-    ack: Any,
     buffer: ByteBuffer,
-    tail: WriteCommand) extends PendingWrite {
+    continue: () ⇒ PendingWrite) extends PendingWrite {
 
     def doWrite(info: ConnectionInfo): PendingWrite = {
       @tailrec def writeToChannel(data: ByteString): PendingWrite = {
@@ -365,7 +378,7 @@ private[io] abstract class TcpConnection(val tcp: TcpExt, val channel: SocketCha
         if (buffer.hasRemaining) {
           // we weren't able to write all bytes from the buffer, so we need to try again later
           if (data eq remainingData) this
-          else new PendingBufferWrite(commander, data, ack, buffer, tail) // copy with updated remainingData
+          else new PendingBufferWrite(commander, data, buffer, continue) // copy with updated remainingData
 
         } else if (data.nonEmpty) {
           buffer.clear()
@@ -374,9 +387,8 @@ private[io] abstract class TcpConnection(val tcp: TcpExt, val channel: SocketCha
           writeToChannel(data drop copied)
 
         } else {
-          if (!ack.isInstanceOf[NoAck]) commander ! ack
           release()
-          PendingWrite(commander, tail)
+          continue()
         }
       }
       try {
@@ -389,17 +401,15 @@ private[io] abstract class TcpConnection(val tcp: TcpExt, val channel: SocketCha
     def release(): Unit = bufferPool.release(buffer)
   }
 
-  def PendingWriteFile(commander: ActorRef, filePath: String, offset: Long, count: Long, ack: Event,
-                       tail: WriteCommand): PendingWriteFile =
-    new PendingWriteFile(commander, new FileInputStream(filePath).getChannel, offset, count, ack, tail)
+  def PendingWriteFile(commander: ActorRef, filePath: String, offset: Long, count: Long, continue: () ⇒ PendingWrite): PendingWriteFile =
+    new PendingWriteFile(commander, new FileInputStream(filePath).getChannel, offset, count, continue)
 
   class PendingWriteFile(
     val commander: ActorRef,
     fileChannel: FileChannel,
     offset: Long,
     remaining: Long,
-    ack: Event,
-    tail: WriteCommand) extends PendingWrite with Runnable {
+    continue: () ⇒ PendingWrite) extends PendingWrite with Runnable {
 
     def doWrite(info: ConnectionInfo): PendingWrite = {
       tcp.fileIoDispatcher.execute(this)
@@ -414,13 +424,11 @@ private[io] abstract class TcpConnection(val tcp: TcpExt, val channel: SocketCha
         val written = fileChannel.transferTo(offset, toWrite, channel)
 
         if (written < remaining) {
-          val updated = new PendingWriteFile(commander, fileChannel, offset + written, remaining - written, ack, tail)
+          val updated = new PendingWriteFile(commander, fileChannel, offset + written, remaining - written, continue)
           self ! UpdatePendingWrite(updated)
-
         } else {
-          if (!ack.isInstanceOf[NoAck]) commander ! ack
           release()
-          self ! UpdatePendingWrite(PendingWrite(commander, tail))
+          self ! UpdatePendingWrite(continue()) // this sends the ack on this thread, aside from the actor
         }
       } catch {
         case e: IOException ⇒ self ! WriteFileFailed(e)
@@ -467,4 +475,5 @@ private[io] object TcpConnection {
     def doWrite(info: ConnectionInfo): PendingWrite = throw new IllegalStateException
     def release(): Unit = throw new IllegalStateException
   }
+  val FinishWithEmptyPendingWrite: () ⇒ PendingWrite = () ⇒ EmptyPendingWrite
 }

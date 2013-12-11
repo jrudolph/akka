@@ -966,6 +966,7 @@ case class FileBytes private[util] (fileName: String, offset: Long = 0, length: 
   def hasFileBytes: Boolean = true
 }
 case class CompoundBytes(parts: Vector[CompactBytes]) extends Bytes {
+  require(parts.nonEmpty)
   def sliceBytes(offset: Long, span: Int): ByteString = slice(offset, span).toByteString
   def toByteArray: Array[Byte] = {
     require(longLength <= Int.MaxValue, "Cannot create a byte array greater than 2GB")
