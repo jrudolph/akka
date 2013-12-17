@@ -254,7 +254,8 @@ object AkkaBuild extends Build {
   lazy val httpCore = Project(
     id = "akka-http-core",
     base = file("akka-http-core"),
-    settings = defaultSettings ++ scaladocSettings ++ javadocSettings ++ OSGi.httpCore++ Seq(
+    dependencies = Seq(actor),
+    settings = defaultSettings ++ scaladocSettings ++ javadocSettings ++ OSGi.httpCore ++ Seq(
       fork in Test := true,
       publishArtifact in Compile := false,
       libraryDependencies ++= Dependencies.httpCore,
@@ -1171,7 +1172,7 @@ object Dependencies {
 
   val remoteTests = Seq(Test.junit, Test.scalatest)
 
-  val httpCore = Seq()
+  val httpCore = Seq(Test.junit, Test.scalatest)
 
   val cluster = Seq(Test.junit, Test.scalatest)
 
