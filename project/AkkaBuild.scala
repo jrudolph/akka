@@ -144,6 +144,7 @@ object AkkaBuild extends Build {
     )
   ) configs (MultiJvm)
 
+  import spray.revolver.RevolverPlugin._
   lazy val actor = Project(
     id = "akka-actor",
     base = file("akka-actor"),
@@ -184,11 +185,12 @@ object AkkaBuild extends Build {
     id = "akka-actor-tests",
     base = file("akka-actor-tests"),
     dependencies = Seq(testkit % "compile;test->test"),
-    settings = defaultSettings ++ formatSettings ++ scaladocSettings  ++ Seq(
+    settings = defaultSettings ++ formatSettings ++ scaladocSettings ++ Revolver.settings ++ Seq(
       publishArtifact in Compile := false,
       libraryDependencies ++= Dependencies.actorTests,
       testOptions += Tests.Argument(TestFrameworks.JUnit, "-v", "-a"),
-      reportBinaryIssues := () // disable bin comp check
+      reportBinaryIssues := (), // disable bin comp check
+      mainClass in Revolver.reStart ~= (_ => Some("akka.io.SimpleIOListener"))
     )
   )
 
