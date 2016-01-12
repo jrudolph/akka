@@ -1,19 +1,20 @@
-# Akka
+In [akka/akka#19403](https://github.com/akka/akka/pull/19403), all commits of the former development branch of
+akka-stream and akka-http were duplicated before merging them into master.
 
-We believe that writing correct concurrent & distributed, resilient and elastic applications is too hard. Most of the time it's because we are using the wrong tools and the wrong level of abstraction.
+For reasons explained in [akka/akka#19403](https://github.com/akka/akka/pull/19403), the duplicate history may lead to confusion over
+what the real commit history of akka-stream/akka-http was. Also, it may interfere with the
+ability to use git tools on branches introduced before the "merge" or git queries ranging
+over commits before and after the merge.
 
-Akka is here to change that.
+For convenience, I provide an alternative merge commit that keeps the original history intact
+but shouldn't otherwise interfere with your git checkout.
 
-Using the Actor Model we raise the abstraction level and provide a better platform to build correct concurrent and scalable applications.
+To make use of it, acquaint yourself with the functionality of [`git replace`](http://git-scm.com/book/en/v2/Git-Tools-Replace) and run this command in your akka checkout:
 
-For resilience we adopt the "Let it crash" model which the telecom industry has used with great success to build applications that self-heal and systems that never stop.
+```
+git fetch https://github.com/jrudolph/akka.git refs/replace/84fd5a9b2a4ebc1dcfe1cda8c072023ba84b44a0:refs/replace/84fd5a9b2a4ebc1dcfe1cda8c072023ba84b44a0
+```
 
-Actors also provide the abstraction for transparent distribution and the basis for truly scalable and fault-tolerant applications.
+This will fetch my version of the merge commit and instruct git to use it instead of the original one.
 
-Akka is Open Source and available under the Apache 2 License.
-
-Learn more at [akka.io](http://akka.io/). Join the [akka-user](https://groups.google.com/forum/#!forum/akka-user) mailing list. Follow [@akkateam](https://twitter.com/akkateam) on twitter.
-
-If you are looking to contribute back to Akka, the [CONTRIBUTING.md](CONTRIBUTING.md) file should provide you with all the information needed to get started. 
-
-[![Gitter](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/akka/akka?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+You can revert this replacement at any time by running `git replace -d 84fd5a9b2a4ebc1dcfe1cda8c072023ba84b44a0`.
