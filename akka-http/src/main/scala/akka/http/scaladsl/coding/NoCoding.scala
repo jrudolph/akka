@@ -7,7 +7,8 @@ package akka.http.scaladsl.coding
 import akka.http.scaladsl.model._
 import akka.http.impl.util.StreamUtils
 import akka.stream.FlowShape
-import akka.stream.stage.{ GraphStage }
+import akka.stream.impl.Compressor
+import akka.stream.stage.GraphStage
 import akka.util.ByteString
 import headers.HttpEncodings
 

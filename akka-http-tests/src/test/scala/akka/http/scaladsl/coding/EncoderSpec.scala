@@ -11,6 +11,7 @@ import headers._
 import HttpMethods.POST
 import scala.concurrent.duration._
 import akka.http.impl.util._
+import akka.stream.impl.Compressor
 
 class EncoderSpec extends WordSpec with CodecSpecSupport {
 

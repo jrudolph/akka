@@ -6,8 +6,9 @@ package akka.http.scaladsl.coding
 
 import akka.NotUsed
 import akka.http.scaladsl.model._
+import akka.stream.impl.DeflateDecompressorBase
 import akka.stream.{ FlowShape, Materializer }
-import akka.stream.stage.{ GraphStage }
+import akka.stream.stage.GraphStage
 import akka.util.ByteString
 import headers.HttpEncoding
 import akka.stream.scaladsl.{ Sink, Source, Flow }
@@ -32,10 +33,10 @@ trait Decoder {
     Source.single(input).via(decoderFlow).runWith(Sink.fold(ByteString.empty)(_ ++ _))
 }
 object Decoder {
-  val MaxBytesPerChunkDefault: Int = 65536
+  val MaxBytesPerChunkDefault: Int = DeflateDecompressorBase.MaxBytesPerChunkDefault
 }
 
-/** A decoder that is implemented in terms of a [[Stage]] */
+/** A decoder that is implemented in terms of a [[GraphStage]] */
 trait StreamDecoder extends Decoder { outer ⇒
   protected def newDecompressorStage(maxBytesPerChunk: Int): () ⇒ GraphStage[FlowShape[ByteString, ByteString]]
 
