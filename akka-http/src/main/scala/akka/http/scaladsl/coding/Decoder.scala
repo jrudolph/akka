@@ -6,12 +6,12 @@ package akka.http.scaladsl.coding
 
 import akka.NotUsed
 import akka.http.scaladsl.model._
-import akka.stream.impl.DeflateDecompressorBase
+import akka.stream.impl.io.compression.DeflateDecompressorBase
 import akka.stream.{ FlowShape, Materializer }
 import akka.stream.stage.GraphStage
 import akka.util.ByteString
 import headers.HttpEncoding
-import akka.stream.scaladsl.{ Sink, Source, Flow }
+import akka.stream.scaladsl.{ Flow, Sink, Source }
 
 import scala.concurrent.Future
 

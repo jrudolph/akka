@@ -6,7 +6,7 @@ package akka.http.scaladsl.coding
 
 import akka.http.scaladsl.model._
 import akka.http.scaladsl.model.headers.HttpEncodings
-import akka.stream.impl.{ DeflateCompressor, DeflateDecompressor }
+import akka.stream.impl.io.compression.{ DeflateCompressor, DeflateDecompressor }
 
 class Deflate(val messageFilter: HttpMessage ⇒ Boolean) extends Coder with StreamDecoder {
   val encoding = HttpEncodings.deflate

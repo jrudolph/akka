@@ -6,7 +6,7 @@ package akka.http.scaladsl.coding
 
 import akka.http.scaladsl.model._
 import akka.http.scaladsl.model.headers.HttpEncodings
-import akka.stream.impl.{ GzipCompressor, GzipDecompressor }
+import akka.stream.impl.io.compression.{ GzipCompressor, GzipDecompressor }
 
 class Gzip(val messageFilter: HttpMessage ⇒ Boolean) extends Coder with StreamDecoder {
   val encoding = HttpEncodings.gzip

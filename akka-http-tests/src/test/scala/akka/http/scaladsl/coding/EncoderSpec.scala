@@ -9,9 +9,10 @@ import org.scalatest.WordSpec
 import akka.http.scaladsl.model._
 import headers._
 import HttpMethods.POST
+
 import scala.concurrent.duration._
 import akka.http.impl.util._
-import akka.stream.impl.Compressor
+import akka.stream.impl.io.compression.Compressor
 
 class EncoderSpec extends WordSpec with CodecSpecSupport {
 
