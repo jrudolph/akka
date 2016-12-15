@@ -48,6 +48,7 @@ class TestMessageSerializer(val system: ExtendedActorSystem) extends SerializerW
   }
 
   override def fromBinary(bytes: Array[Byte], manifest: String): AnyRef = {
+    //Thread.sleep(1)
     val protoMsg = proto.TestMessage.parseFrom(bytes)
     import scala.collection.JavaConverters._
     val items = protoMsg.getItemsList.asScala.map { item ⇒

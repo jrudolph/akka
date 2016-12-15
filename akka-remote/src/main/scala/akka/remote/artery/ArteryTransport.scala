@@ -326,7 +326,8 @@ private[remote] class ArteryTransport(_system: ExtendedActorSystem, _provider: R
 
   private val testState = new SharedTestState
 
-  private val inboundLanes = settings.Advanced.InboundLanes
+  private val inboundLanes = math.abs(settings.Advanced.InboundLanes)
+  private val useAsync = true //sys.props("multinode.index").toInt == 0 //settings.Advanced.InboundLanes < 0
 
   // TODO use WildcardIndex.isEmpty when merged from master
   val largeMessageChannelEnabled =
@@ -685,7 +686,7 @@ private[remote] class ArteryTransport(_system: ExtendedActorSystem, _provider: R
   private def runInboundOrdinaryMessagesStream(compression: InboundCompressions): Unit = {
     if (isShutdown) throw ShuttingDown
     val (resourceLife, completed) =
-      if (inboundLanes == 1) {
+      if (inboundLanes == 1 && !useAsync) {
         aeronSource(ordinaryStreamId, envelopeBufferPool)
           .via(inboundFlow(compression))
           .toMat(inboundSink(envelopeBufferPool))(Keep.both)
@@ -708,8 +709,11 @@ private[remote] class ArteryTransport(_system: ExtendedActorSystem, _provider: R
         // select lane based on destination, to preserve message order
         val partitionFun: OptionVal[ActorRef] ⇒ Int = {
           _ match {
-            case OptionVal.Some(r) ⇒ math.abs(r.path.uid) % inboundLanes
-            case OptionVal.None    ⇒ 0
+            case OptionVal.Some(r) ⇒
+              val id = math.abs(r.path.uid) % inboundLanes
+              //println(f"$id%2d $r%s")
+              id
+            case OptionVal.None ⇒ 0
           }
         }
 
@@ -719,7 +723,8 @@ private[remote] class ArteryTransport(_system: ExtendedActorSystem, _provider: R
               // TODO replace filter with "PartitionHub" when that is implemented
               // must use a tuple here because envelope is pooled and must only be touched in the selected lane
               Flow[(OptionVal[ActorRef], InboundEnvelope)].collect {
-                case (recipient, env) if partitionFun(recipient) == i ⇒ env
+                case (recipient, env) if partitionFun(recipient) == i ⇒
+                  env
               }
                 .toMat(lane)(Keep.right))(materializer)
           }(collection.breakOut)

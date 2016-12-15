@@ -22,6 +22,7 @@ import akka.Done
 
 import scala.concurrent.Promise
 import akka.event.Logging
+import akka.stream.impl.fusing.GraphInterpreter
 
 /**
  * INTERNAL API
@@ -374,7 +375,8 @@ private[remote] class Decoder(
             classManifest,
             headerBuilder.flags,
             envelope,
-            association)
+            association,
+            headerBuilder.timestamp)
 
           if (recipient.isEmpty && !headerBuilder.isNoRecipient) {
 
@@ -492,11 +494,31 @@ private[remote] class Deserializer(
 
       override protected def logSource = classOf[Deserializer]
 
+      var counter = 0
+      var totalAsyncTime = 0L
+      var maxAsyncTime = 0L
+      var totalReceiveTime = 0L
+
       override def onPush(): Unit = {
         val envelope = grab(in)
 
+        val lasted = System.nanoTime() - envelope.receiveNanos
+        maxAsyncTime = maxAsyncTime max lasted
+        totalAsyncTime += lasted
+        totalReceiveTime += envelope.receiveNanos - envelope.sendNanos
+        counter += 1
+        if ((counter % 10000) == 0) {
+          println(s"Async boundary time: ${totalAsyncTime / 10000} ns / msg max ${maxAsyncTime / 1000} µs send/receive time: ${totalReceiveTime / 10000} ns / msg")
+          counter = 0
+          totalAsyncTime = 0
+          totalReceiveTime = 0
+          maxAsyncTime = 0
+        }
+
         try {
           val startTime: Long = if (instruments.timeSerialization) System.nanoTime else 0
+
+          //println(s"${System.identityHashCode(this)} ${GraphInterpreter.currentInterpreter.context}")
 
           val deserializedMessage = MessageSerializer.deserializeForArtery(
             system, envelope.originUid, serialization, envelope.serializer, envelope.classManifest, envelope.envelopeBuffer)

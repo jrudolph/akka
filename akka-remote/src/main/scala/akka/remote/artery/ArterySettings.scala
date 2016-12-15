@@ -88,8 +88,8 @@ private[akka] final class ArterySettings private (config: Config) {
       1 <= level && level <= 10, "idle-cpu-level must be between 1 and 10")
     val OutboundLanes = getInt("outbound-lanes").requiring(n ⇒
       n > 0, "outbound-lanes must be greater than zero")
-    val InboundLanes = getInt("inbound-lanes").requiring(n ⇒
-      n > 0, "inbound-lanes must be greater than zero")
+    val InboundLanes = getInt("inbound-lanes") /*.requiring(n ⇒
+      n > 0, "inbound-lanes must be greater than zero")*/
     val SysMsgBufferSize: Int = getInt("system-message-buffer-size").requiring(
       _ > 0, "system-message-buffer-size must be more than zero")
     val OutboundMessageQueueSize: Int = getInt("outbound-message-queue-size").requiring(

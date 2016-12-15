@@ -30,8 +30,8 @@ object LatencySpec extends MultiNodeConfig {
   commonConfig(debugConfig(on = false).withFallback(
     ConfigFactory.parseString(s"""
        # for serious measurements you should increase the totalMessagesFactor (30) and repeatCount (3)
-       akka.test.LatencySpec.totalMessagesFactor = 1.0
-       akka.test.LatencySpec.repeatCount = 1
+       akka.test.LatencySpec.totalMessagesFactor = 8
+       akka.test.LatencySpec.repeatCount = 2
        akka.test.LatencySpec.real-message = off
        akka {
          loglevel = ERROR
@@ -45,13 +45,31 @@ object LatencySpec extends MultiNodeConfig {
          }
          remote.artery {
            enabled = on
-           advanced.idle-cpu-level=7
+           advanced.idle-cpu-level = 3
+
+           advanced.embedded-media-driver = off
+           advanced.aeron-dir = "/tmp/aeron"
 
            advanced.compression {
              actor-refs.advertisement-interval = 2 second
              manifests.advertisement-interval = 2 second
            }
+
+           advanced {
+             inbound-lanes = 1
+             #buffer-pool-size = 512
+           }
          }
+       }
+       akka.remote.default-remote-dispatcher.fork-join-executor {
+         parallelism-factor = 1.0
+         parallelism-min = 2
+         parallelism-max = 2
+       }
+       akka.remote.default-dispatcher.fork-join-executor {
+         parallelism-factor = 1.0
+         parallelism-min = 2
+         parallelism-max = 2
        }
        """)).withFallback(RemotingMultiNodeSpec.commonConfig))
 
@@ -205,7 +223,7 @@ abstract class LatencySpec
       payloadSize = 100,
       repeat = repeatCount,
       realMessage),
-    TestSettings(
+    /*TestSettings(
       testName = "rate-100-size-100",
       messageRate = 100,
       payloadSize = 100,
@@ -222,24 +240,26 @@ abstract class LatencySpec
       messageRate = 10000,
       payloadSize = 100,
       repeat = repeatCount,
-      realMessage),
+      realMessage),*/
     TestSettings(
       testName = "rate-20000-size-100",
       messageRate = 20000,
       payloadSize = 100,
       repeat = repeatCount,
-      realMessage),
+      realMessage) /*,
     TestSettings(
       testName = "rate-1000-size-1k",
       messageRate = 1000,
       payloadSize = 1000,
       repeat = repeatCount,
-      realMessage))
+      realMessage)*/ )
 
   def test(testSettings: TestSettings): Unit = {
     import testSettings._
 
     runOn(first) {
+      println(s"Sender is multinode.index ${sys.props.get("multinode.index")}")
+
       val payload = ("0" * payloadSize).getBytes("utf-8")
       // by default run for 2 seconds, but can be adjusted with the totalMessagesFactor
       val totalMessages = (2 * messageRate * totalMessagesFactor).toInt
@@ -309,7 +329,7 @@ abstract class LatencySpec
         }
 
         watch(receiver)
-        expectTerminated(receiver, ((totalMessages / messageRate) + 20).seconds)
+        expectTerminated(receiver, ((totalMessages / messageRate) + 100).seconds)
         val p = plotProbe.expectMsgType[LatencyPlots]
         // only use the last repeat for the plots
         if (n == repeat) {
@@ -330,6 +350,8 @@ abstract class LatencySpec
 
     "start echo" in {
       runOn(second) {
+        println(s"Receiver is multinode.index ${sys.props.get("multinode.index")}")
+
         // just echo back
         system.actorOf(echoProps, "echo")
       }
