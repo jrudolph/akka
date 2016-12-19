@@ -144,6 +144,7 @@ private[akka] class IteratorInterpreter[I, O](
       logics,
       connections,
       (_, _, _) ⇒ throw new UnsupportedOperationException("IteratorInterpreter does not support asynchronous events."),
+      () ⇒ 0,
       fuzzingMode = false,
       null)
     interpreter.attachUpstreamBoundary(connections(0), upstream)

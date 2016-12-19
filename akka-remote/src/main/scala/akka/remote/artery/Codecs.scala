@@ -519,7 +519,9 @@ private[remote] class Deserializer(
 
         if ((asyncHisto.getTotalCount % 50000) == 0) {
           asyncHisto.outputPercentileDistribution(System.out, 1000.0)
+          asyncHisto.reset()
           networkHisto.outputPercentileDistribution(System.out, 1000.0)
+          networkHisto.reset()
           /*}
 
         if ((counter % 10000) == 0) {*/

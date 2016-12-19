@@ -27,6 +27,7 @@ import akka.stream.stage.GraphStageWithMaterializedValue
 
 import scala.util.control.NonFatal
 import akka.stream.stage.StageLogging
+import akka.util.Unsafe
 import io.aeron.exceptions.DriverTimeoutException
 
 /**
@@ -95,7 +96,7 @@ private[remote] class AeronSource(
 
       private val sub = aeron.addSubscription(channel, streamId)
       // spin between 100 to 10000 depending on idleCpuLevel
-      private val spinning = 1100 * taskRunner.idleCpuLevel - 1000
+      private val spinning = 0 //1100 * taskRunner.idleCpuLevel - 1000
       private var backoffCount = spinning
       private var delegateTaskStartTime = 0L
       private var countBeforeDelegate = 0L

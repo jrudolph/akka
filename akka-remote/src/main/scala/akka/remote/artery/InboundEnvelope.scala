@@ -67,7 +67,7 @@ private[remote] object ReusableInboundEnvelope {
 /**
  * INTERNAL API
  */
-private[remote] final class ReusableInboundEnvelope extends InboundEnvelope {
+private[remote] final class ReusableInboundEnvelope extends InboundEnvelope with akka.stream.scaladsl.TimingAccess {
   private var _recipient: OptionVal[InternalActorRef] = OptionVal.None
   private var _sender: OptionVal[ActorRef] = OptionVal.None
   private var _originUid: Long = 0L
@@ -90,6 +90,11 @@ private[remote] final class ReusableInboundEnvelope extends InboundEnvelope {
   override def envelopeBuffer: EnvelopeBuffer = _envelopeBuffer
   def receiveNanos: Long = _receiveNanos
   def sendNanos: Long = _sendNanos
+  def timer: Long = receiveNanos
+
+  private var _queueStartTime = 0L
+  def setQueueStartTime(time: Long): Unit = _queueStartTime = time
+  def queueStart: Long = _queueStartTime
 
   override def flags: Byte = _flags
   override def flag(byteFlag: ByteFlag): Boolean = byteFlag.isEnabled(_flags)

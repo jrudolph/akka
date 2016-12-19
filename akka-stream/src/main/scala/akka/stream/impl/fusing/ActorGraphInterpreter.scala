@@ -59,7 +59,9 @@ object ActorGraphInterpreter {
   final case class SubscribePending(shell: GraphInterpreterShell, id: Int) extends BoundaryEvent
   final case class ExposedPublisher(shell: GraphInterpreterShell, id: Int, publisher: ActorPublisher[Any]) extends BoundaryEvent
 
-  final case class AsyncInput(shell: GraphInterpreterShell, logic: GraphStageLogic, evt: Any, handler: (Any) ⇒ Unit) extends BoundaryEvent
+  final case class AsyncInput(shell: GraphInterpreterShell, logic: GraphStageLogic, evt: Any, handler: (Any) ⇒ Unit) extends BoundaryEvent {
+    override def toString: String = s"AsyncInput(${logic.getClass}, $evt)"
+  }
 
   case class Resume(shell: GraphInterpreterShell) extends BoundaryEvent
   case class Abort(shell: GraphInterpreterShell) extends BoundaryEvent
@@ -321,6 +323,7 @@ final class GraphInterpreterShell(
   lazy val log = Logging(mat.system.eventStream, self)
 
   private var enqueueToShortCircuit: (Any) ⇒ Unit = _
+  private var queueLength: () ⇒ Int = _
 
   lazy val interpreter: GraphInterpreter = new GraphInterpreter(assembly, mat, log, logics, connections,
     (logic, event, handler) ⇒ {
@@ -329,7 +332,7 @@ final class GraphInterpreterShell(
       if (currentInterpreter == null || (currentInterpreter.context ne self))
         self ! asyncInput
       else enqueueToShortCircuit(asyncInput)
-    }, settings.fuzzingMode, self)
+    }, queueLength, settings.fuzzingMode, self)
 
   private val inputs = new Array[BatchingActorInputBoundary](shape.inlets.size)
   private val outputs = new Array[ActorOutputBoundary](shape.outlets.size)
@@ -359,9 +362,10 @@ final class GraphInterpreterShell(
   private var resumeScheduled = false
 
   def isInitialized: Boolean = self != null
-  def init(self: ActorRef, subMat: SubFusingActorMaterializerImpl, enqueueToShortCircuit: (Any) ⇒ Unit, eventLimit: Int): Int = {
+  def init(self: ActorRef, subMat: SubFusingActorMaterializerImpl, enqueueToShortCircuit: (Any) ⇒ Unit, queueLength: () ⇒ Int, eventLimit: Int): Int = {
     this.self = self
     this.enqueueToShortCircuit = enqueueToShortCircuit
+    this.queueLength = queueLength
     var i = 0
     while (i < inputs.length) {
       val in = new BatchingActorInputBoundary(settings.maxInputBufferSize, i)
@@ -535,7 +539,7 @@ class ActorGraphInterpreter(_initial: GraphInterpreterShell) extends Actor with 
 
   def tryInit(shell: GraphInterpreterShell): Boolean =
     try {
-      currentLimit = shell.init(self, subFusingMaterializerImpl, enqueueToShortCircuit(_), currentLimit)
+      currentLimit = shell.init(self, subFusingMaterializerImpl, enqueueToShortCircuit(_), () ⇒ if (shortCircuitBuffer eq null) 0 else shortCircuitBuffer.size(), currentLimit)
       if (GraphInterpreter.Debug) println(s"registering new shell in ${_initial}\n  ${shell.toString.replace("\n", "\n  ")}")
       if (shell.isTerminated) false
       else {

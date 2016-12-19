@@ -66,7 +66,7 @@ object LatencySpec extends MultiNodeConfig {
          parallelism-min = 2
          parallelism-max = 2
        }
-       akka.remote.default-dispatcher.fork-join-executor {
+       akka.actor.default-dispatcher.fork-join-executor {
          parallelism-factor = 1.0
          parallelism-min = 2
          parallelism-max = 2

@@ -4,16 +4,21 @@
 package akka.stream.impl.fusing
 
 import java.util.Arrays
-import akka.actor.ActorRef
+
+import akka.actor.{ ActorCell, ActorRef, LocalActorRef, RepointableActorRef }
 import akka.event.LoggingAdapter
 import akka.stream.stage._
+
 import scala.annotation.tailrec
 import scala.collection.immutable
 import akka.stream._
 import akka.stream.impl.StreamLayout._
 import java.util.concurrent.ThreadLocalRandom
+
 import scala.util.control.NonFatal
 import java.{ util ⇒ ju }
+
+import akka.dispatch.UnboundedMailbox
 import akka.stream.impl.fusing.GraphStages.MaterializedValueSource
 
 /**
@@ -395,6 +400,7 @@ final class GraphInterpreter(
   val logics:           Array[GraphStageLogic], // Array of stage logics
   val connections:      Array[GraphInterpreter.Connection],
   val onAsyncInput:     (GraphStageLogic, Any, (Any) ⇒ Unit) ⇒ Unit,
+  val asyncQueueSize:   () ⇒ Int,
   val fuzzingMode:      Boolean,
   val context:          ActorRef) {
   import GraphInterpreter._
@@ -911,7 +917,11 @@ final class GraphInterpreter(
     }
 
     builder.append("}\n")*/
-    builder.append(s"// $queueStatus (running=$runningStages, shutdown=${shutdownCounter.mkString(",")})")
+    val numMsgs = context.asInstanceOf[RepointableActorRef].underlying.numberOfMessages
+    val queue = context.asInstanceOf[RepointableActorRef].underlying.asInstanceOf[ActorCell].mailbox.messageQueue.asInstanceOf[UnboundedMailbox.MessageQueue]
+    import scala.collection.JavaConverters._
+
+    builder.append(s"// $queueStatus shortCircuitBuffer size: ${asyncQueueSize()} numMsgs: $numMsgs queued: [${queue.asScala.mkString(", ")}] (running=$runningStages, shutdown=${shutdownCounter.mkString(",")})")
     builder.toString()
   }
 }
