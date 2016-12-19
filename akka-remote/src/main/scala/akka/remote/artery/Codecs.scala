@@ -22,6 +22,8 @@ import akka.Done
 
 import scala.concurrent.Promise
 import akka.event.Logging
+import akka.stream.impl.fusing.GraphInterpreter
+import org.HdrHistogram.Histogram
 
 /**
  * INTERNAL API
@@ -493,11 +495,47 @@ private[remote] class Deserializer(
 
       override protected def logSource = classOf[Deserializer]
 
+      val asyncHisto = new Histogram(SECONDS.toNanos(10), 3)
+      val networkHisto = new Histogram(SECONDS.toNanos(10), 3)
+
+      var counter = 0
+      var totalAsyncTime = 0L
+      var maxAsyncTime = 0L
+      var totalReceiveTime = 0L
+
       override def onPush(): Unit = {
         val envelope = grab(in)
 
+        val asyncNanos = System.nanoTime() - envelope.receiveNanos
+        val networkNanos = envelope.receiveNanos - envelope.sendNanos
+
+        maxAsyncTime = maxAsyncTime max asyncNanos
+        totalAsyncTime += asyncNanos
+        totalReceiveTime += networkNanos
+        counter += 1
+
+        asyncHisto.recordValue(asyncNanos)
+        networkHisto.recordValue(networkNanos)
+
+        if ((asyncHisto.getTotalCount % 50000) == 0) {
+          asyncHisto.outputPercentileDistribution(System.out, 1000.0)
+          asyncHisto.reset()
+          networkHisto.outputPercentileDistribution(System.out, 1000.0)
+          networkHisto.reset()
+          /*}
+
+        if ((counter % 10000) == 0) {*/
+          println(s"Async boundary time: ${totalAsyncTime / counter} ns / msg max ${maxAsyncTime / 1000} µs send/receive time: ${totalReceiveTime / counter} ns / msg")
+          counter = 0
+          totalAsyncTime = 0
+          totalReceiveTime = 0
+          maxAsyncTime = 0
+        }
+
         try {
           val startTime: Long = if (instruments.timeSerialization) System.nanoTime else 0
+
+          //println(s"${System.identityHashCode(this)} ${GraphInterpreter.currentInterpreter.context}")
 
           val deserializedMessage = MessageSerializer.deserializeForArtery(
             system, envelope.originUid, serialization, envelope.serializer, envelope.classManifest, envelope.envelopeBuffer)

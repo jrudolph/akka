@@ -3,6 +3,7 @@
  */
 package akka.stream.scaladsl
 
+import java.util.concurrent.ThreadLocalRandom
 import java.util.concurrent.atomic.{ AtomicLong, AtomicReference }
 
 import akka.NotUsed
@@ -11,8 +12,10 @@ import akka.stream._
 import akka.stream.stage._
 
 import scala.annotation.tailrec
+import scala.concurrent.duration._
 import scala.concurrent.{ Future, Promise }
 import scala.util.{ Failure, Success, Try }
+import org.HdrHistogram.Histogram
 
 /**
  * A MergeHub is a special streaming hub that is able to collect streamed elements from a dynamic set of
@@ -407,8 +410,23 @@ private[akka] class BroadcastHub[T](bufferSize: Int) extends GraphStageWithMater
     // Cannot complete immediately if there is no space in the queue to put the completion marker
     override def onUpstreamFinish(): Unit = if (!isFull) complete()
 
+    val timerHist = new Histogram(SECONDS.toNanos(10), 3)
     override def onPush(): Unit = {
-      publish(grab(in))
+      val ele = grab(in)
+      ele match {
+        case (_, t: TimingAccess) ⇒
+          val now = System.nanoTime()
+          timerHist.recordValue(now - t.timer)
+          if ((timerHist.getTotalCount % 50000) == 0) {
+            println(s"onPush timer")
+            timerHist.outputPercentileDistribution(System.out, 1000.0)
+            timerHist.reset()
+          }
+          t.setQueueStartTime(now)
+        case _ ⇒
+      }
+
+      publish(ele)
       if (!isFull) pull(in)
     }
 
@@ -440,12 +458,12 @@ private[akka] class BroadcastHub[T](bufferSize: Int) extends GraphStageWithMater
           } else checkUnblock(previousOffset)
         case Advance(id, previousOffset) ⇒
           val newOffset = previousOffset + DemandThreshold
-          // Move the consumer from its last known offest to its new one. Check if we are unblocked.
+          // Move the consumer from its last known offset to its new one. Check if we are unblocked.
           val consumer = findAndRemoveConsumer(id, previousOffset)
           addConsumer(consumer, newOffset)
           checkUnblock(previousOffset)
         case NeedWakeup(id, previousOffset, currentOffset) ⇒
-          // Move the consumer from its last known offest to its new one. Check if we are unblocked.
+          // Move the consumer from its last known offset to its new one. Check if we are unblocked.
           val consumer = findAndRemoveConsumer(id, previousOffset)
           addConsumer(consumer, currentOffset)
 
@@ -573,13 +591,34 @@ private[akka] class BroadcastHub[T](bufferSize: Int) extends GraphStageWithMater
       queue(idx) = elem.asInstanceOf[AnyRef]
       // Publish the new tail before calling the wakeup
       tail = tail + 1
+
+      //if (tail % 100 == 0) println(s"Queue size is ${tail - head}")
       wakeupIdx(wheelSlot)
     }
 
+    val shouldPrint = sys.props("multinode.index").toInt == 1
+    val id = System.identityHashCode(this)
+    val start = System.nanoTime()
+    var last = start
     // Consumer API
     def poll(offset: Int): AnyRef = {
       if (offset == tail) null
-      else queue(offset & Mask)
+      else {
+        val ele = queue(offset & Mask)
+        val now = System.nanoTime()
+        if (shouldPrint && ThreadLocalRandom.current().nextDouble() < 0.001) {
+          val age = ele match {
+            case (_, t: TimingAccess) ⇒ now - t.queueStart
+            case _                    ⇒ 0L
+          }
+
+          println(f"${Console.BLUE}[${Thread.currentThread().getName}%s] [${now - last}%8d] Left to read ${tail - offset}%2d age: $age%7d${Console.RESET}")
+
+        }
+        last = now
+
+        ele
+      }
     }
 
     setHandler(in, this)
@@ -621,7 +660,7 @@ private[akka] class BroadcastHub[T](bufferSize: Int) extends GraphStageWithMater
           val onHubReady: Try[AsyncCallback[HubEvent]] ⇒ Unit = {
             case Success(callback) ⇒
               hubCallback = callback
-              if (isAvailable(out) && offsetInitialized) onPull()
+              if (isAvailable(out) && offsetInitialized) processPull(afterWakeup = true)
               callback.invoke(RegistrationPending)
             case Failure(ex) ⇒
               failStage(ex)
@@ -650,7 +689,13 @@ private[akka] class BroadcastHub[T](bufferSize: Int) extends GraphStageWithMater
 
         }
 
-        override def onPull(): Unit = {
+        val timerHistoDirect = new Histogram(SECONDS.toNanos(10), 3)
+        val timerHistoAfterWakeUp = new Histogram(SECONDS.toNanos(10), 3)
+        val queueTime = new Histogram(SECONDS.toNanos(10), 3)
+
+        override def onPull(): Unit = processPull(afterWakeup = false)
+
+        def processPull(afterWakeup: Boolean): Unit = {
           if (offsetInitialized && (hubCallback ne null)) {
             val elem = logic.poll(offset)
 
@@ -662,6 +707,30 @@ private[akka] class BroadcastHub[T](bufferSize: Int) extends GraphStageWithMater
               case Completed ⇒
                 completeStage()
               case _ ⇒
+                elem match {
+                  case (_, t: TimingAccess) ⇒
+                    val histo = if (afterWakeup) timerHistoAfterWakeUp else timerHistoDirect
+
+                    val now = System.nanoTime()
+                    histo.recordValue(now - t.timer)
+                    queueTime.recordValue(now - t.queueStart)
+
+                    if ((histo.getTotalCount % 50000) == 0) {
+                      println(s"Receive from decoder times afterWakeup: false")
+                      timerHistoDirect.outputPercentileDistribution(System.out, 1000.0)
+                      timerHistoDirect.reset()
+
+                      println(s"Receive from decoder times afterWakeup: true")
+                      timerHistoAfterWakeUp.outputPercentileDistribution(System.out, 1000.0)
+                      timerHistoAfterWakeUp.reset()
+
+                      println(s"Queue time")
+                      queueTime.outputPercentileDistribution(System.out, 1000.0)
+                      queueTime.reset()
+                    }
+                  case _ ⇒
+                }
+
                 push(out, elem.asInstanceOf[T])
                 offset += 1
                 untilNextAdvanceSignal -= 1
@@ -684,12 +753,12 @@ private[akka] class BroadcastHub[T](bufferSize: Int) extends GraphStageWithMater
           case HubCompleted(Some(ex)) ⇒ failStage(ex)
           case HubCompleted(None)     ⇒ completeStage()
           case Wakeup ⇒
-            if (isAvailable(out)) onPull()
+            if (isAvailable(out)) processPull(afterWakeup = true)
           case Initialize(initialOffset) ⇒
             offsetInitialized = true
             previousPublishedOffset = initialOffset
             offset = initialOffset
-            if (isAvailable(out) && (hubCallback ne null)) onPull()
+            if (isAvailable(out) && (hubCallback ne null)) processPull(afterWakeup = true)
         }
 
         setHandler(out, this)
