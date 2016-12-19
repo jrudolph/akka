@@ -374,7 +374,8 @@ private[remote] class Decoder(
             classManifest,
             headerBuilder.flags,
             envelope,
-            association)
+            association,
+            headerBuilder.timestamp)
 
           if (recipient.isEmpty && !headerBuilder.isNoRecipient) {
 

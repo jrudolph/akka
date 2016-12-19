@@ -328,6 +328,12 @@ object BroadcastHub {
 
 }
 
+trait TimingAccess {
+  def timer: Long
+  def setQueueStartTime(time: Long): Unit
+  def queueStart: Long
+}
+
 /**
  * INTERNAL API
  */

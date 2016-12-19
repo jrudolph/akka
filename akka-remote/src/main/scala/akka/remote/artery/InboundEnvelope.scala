@@ -22,7 +22,7 @@ private[remote] object InboundEnvelope {
     originUid:   Long,
     association: OptionVal[OutboundContext]): InboundEnvelope = {
     val env = new ReusableInboundEnvelope
-    env.init(recipient, sender, originUid, -1, "", 0, null, association)
+    env.init(recipient, sender, originUid, -1, "", 0, null, association, 0)
       .withMessage(message)
   }
 
@@ -50,6 +50,9 @@ private[remote] trait InboundEnvelope {
   def releaseEnvelopeBuffer(): InboundEnvelope
 
   def withRecipient(ref: InternalActorRef): InboundEnvelope
+
+  def receiveNanos: Long
+  def sendNanos: Long
 }
 
 /**
@@ -64,7 +67,7 @@ private[remote] object ReusableInboundEnvelope {
 /**
  * INTERNAL API
  */
-private[remote] final class ReusableInboundEnvelope extends InboundEnvelope {
+private[remote] final class ReusableInboundEnvelope extends InboundEnvelope with akka.stream.scaladsl.TimingAccess {
   private var _recipient: OptionVal[InternalActorRef] = OptionVal.None
   private var _sender: OptionVal[ActorRef] = OptionVal.None
   private var _originUid: Long = 0L
@@ -74,6 +77,8 @@ private[remote] final class ReusableInboundEnvelope extends InboundEnvelope {
   private var _flags: Byte = 0
   private var _message: AnyRef = null
   private var _envelopeBuffer: EnvelopeBuffer = null
+  private var _receiveNanos: Long = 0L
+  private var _sendNanos: Long = 0L
 
   override def recipient: OptionVal[InternalActorRef] = _recipient
   override def sender: OptionVal[ActorRef] = _sender
@@ -83,6 +88,13 @@ private[remote] final class ReusableInboundEnvelope extends InboundEnvelope {
   override def classManifest: String = _classManifest
   override def message: AnyRef = _message
   override def envelopeBuffer: EnvelopeBuffer = _envelopeBuffer
+  def receiveNanos: Long = _receiveNanos
+  def sendNanos: Long = _sendNanos
+  def timer: Long = receiveNanos
+
+  private var _queueStartTime = 0L
+  def setQueueStartTime(time: Long): Unit = _queueStartTime = time
+  def queueStart: Long = _queueStartTime
 
   override def flags: Byte = _flags
   override def flag(byteFlag: ByteFlag): Boolean = byteFlag.isEnabled(_flags)
@@ -108,6 +120,8 @@ private[remote] final class ReusableInboundEnvelope extends InboundEnvelope {
     _sender = OptionVal.None
     _originUid = 0L
     _association = OptionVal.None
+    _receiveNanos = 0L
+    _sendNanos = 0L
   }
 
   def init(
@@ -118,7 +132,10 @@ private[remote] final class ReusableInboundEnvelope extends InboundEnvelope {
     classManifest:  String,
     flags:          Byte,
     envelopeBuffer: EnvelopeBuffer,
-    association:    OptionVal[OutboundContext]): InboundEnvelope = {
+    association:    OptionVal[OutboundContext],
+    sendTimestamp:  Long): InboundEnvelope = {
+    _receiveNanos = System.nanoTime()
+    _sendNanos = sendTimestamp
     _recipient = recipient
     _sender = sender
     _originUid = originUid

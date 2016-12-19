@@ -85,10 +85,11 @@ private[remote] object EnvelopeBuffer {
   val SenderActorRefTagOffset = 16 // Int
   val RecipientActorRefTagOffset = 20 // Int
   val ClassManifestTagOffset = 24 // Int
+  val TimestampOffset = 28 // Long
 
   // EITHER metadata followed by literals directly OR literals directly in this spot.
   // Mode depends on the `MetadataPresentFlag`.
-  val MetadataContainerAndLiteralSectionOffset = 28 // Int
+  val MetadataContainerAndLiteralSectionOffset = 36 // Int
 
   val UsAscii = Charset.forName("US-ASCII")
 
@@ -180,6 +181,8 @@ private[remote] sealed trait HeaderBuilder {
    * i.e. Encoder calls this as the first thing in onPush.
    */
   def resetMessageFields(): Unit
+
+  def timestamp: Long
 }
 
 /**
@@ -216,6 +219,8 @@ private[remote] final class HeaderBuilderImpl(
   var _inboundClassManifestCompressionTableVersion: Byte = 0
   var _useOutboundCompression: Boolean = true
 
+  var _timestamp: Long = 0L
+
   var _senderActorRef: String = null
   var _senderActorRefIdx: Int = -1
   var _recipientActorRef: String = null
@@ -239,6 +244,8 @@ private[remote] final class HeaderBuilderImpl(
     _manifestIdx = -1
 
     _remoteInstruments = OptionVal.None
+
+    _timestamp = 0L
   }
 
   override def setVersion(v: Byte) = _version = v
@@ -253,6 +260,8 @@ private[remote] final class HeaderBuilderImpl(
 
   override def setUid(uid: Long) = _uid = uid
   override def uid: Long = _uid
+
+  def timestamp: Long = _timestamp
 
   override def inboundActorRefCompressionTableVersion: Byte = _inboundActorRefCompressionTableVersion
   override def inboundClassManifestCompressionTableVersion: Byte = _inboundClassManifestCompressionTableVersion
@@ -383,6 +392,7 @@ private[remote] final class EnvelopeBuffer(val byteBuffer: ByteBuffer) {
     // compression table version numbers
     byteBuffer.put(ActorRefCompressionTableVersionOffset, header.outboundActorRefCompression.version)
     byteBuffer.put(ClassManifestCompressionTableVersionOffset, header.outboundClassManifestCompression.version)
+    byteBuffer.putLong(TimestampOffset, System.nanoTime())
 
     // maybe write some metadata
     // after metadata is written (or not), buffer is at correct position to continue writing literals
@@ -427,6 +437,8 @@ private[remote] final class EnvelopeBuffer(val byteBuffer: ByteBuffer) {
     // compression table versions (stored in the Tag)
     header._inboundActorRefCompressionTableVersion = byteBuffer.get(ActorRefCompressionTableVersionOffset)
     header._inboundClassManifestCompressionTableVersion = byteBuffer.get(ClassManifestCompressionTableVersionOffset)
+
+    header._timestamp = byteBuffer.getLong(TimestampOffset)
 
     byteBuffer.position(MetadataContainerAndLiteralSectionOffset)
     if (header.flag(MetadataPresentFlag)) {
