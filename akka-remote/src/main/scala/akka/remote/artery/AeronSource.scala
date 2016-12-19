@@ -3,12 +3,14 @@
  */
 package akka.remote.artery
 
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.{ ThreadLocalRandom, TimeUnit }
+
 import scala.annotation.tailrec
 import scala.concurrent.duration._
 import akka.stream.Attributes
 import akka.stream.Outlet
 import akka.stream.SourceShape
+import akka.stream.impl.fusing.GraphInterpreter
 import akka.stream.stage.AsyncCallback
 import akka.stream.stage.GraphStage
 import akka.stream.stage.GraphStageLogic
@@ -22,6 +24,7 @@ import org.agrona.DirectBuffer
 import org.agrona.concurrent.BackoffIdleStrategy
 import org.agrona.hints.ThreadHints
 import akka.stream.stage.GraphStageWithMaterializedValue
+
 import scala.util.control.NonFatal
 import akka.stream.stage.StageLogging
 import io.aeron.exceptions.DriverTimeoutException
@@ -130,7 +133,16 @@ private[remote] class AeronSource(
       // OutHandler
       override def onPull(): Unit = {
         backoffCount = spinning
+
+        val flag = ThreadLocalRandom.current().nextFloat() < 0.001
+
+        val before =
+          if (flag) {
+            println(s"Before: ${GraphInterpreter.currentInterpreter.toString}")
+            System.nanoTime()
+          } else 0
         subscriberLoop()
+        if (flag) println(s"After: ${GraphInterpreter.currentInterpreter} spun for ${System.nanoTime() - before} ns")
       }
 
       @tailrec private def subscriberLoop(): Unit = {
@@ -148,7 +160,8 @@ private[remote] class AeronSource(
           backoffCount -= 1
           if (backoffCount > 0) {
             ThreadHints.onSpinWait()
-            subscriberLoop() // recursive
+            subscriberLoop()
+            //getAsyncCallback[Unit](asyncLoop).invoke(()) // recursive
           } else {
             // delegate backoff to shared TaskRunner
             flightRecorder.hiFreq(AeronSource_DelegateToTaskRunner, countBeforeDelegate)

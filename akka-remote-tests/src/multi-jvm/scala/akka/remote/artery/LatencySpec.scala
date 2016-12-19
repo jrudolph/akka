@@ -45,10 +45,10 @@ object LatencySpec extends MultiNodeConfig {
          }
          remote.artery {
            enabled = on
-           advanced.idle-cpu-level = 3
+           advanced.idle-cpu-level = 7
 
            advanced.embedded-media-driver = off
-           advanced.aeron-dir = "/tmp/aeron"
+           advanced.aeron-dir = "/dev/shm/aeron"
 
            advanced.compression {
              actor-refs.advertisement-interval = 2 second

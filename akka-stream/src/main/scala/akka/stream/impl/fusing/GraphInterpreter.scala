@@ -435,7 +435,7 @@ final class GraphInterpreter(
       val conn = eventQueue(idx & mask)
       conn
     })
-    s"(${eventQueue.length}, $queueHead, $queueTail)(${contents.mkString(", ")})"
+    s"(${eventQueue.length}, $queueHead, $queueTail, ${queueHead - queueTail})(${contents.mkString(", ")})"
   }
   private[this] var _Name: String = _
   def Name: String =
@@ -878,7 +878,9 @@ final class GraphInterpreter(
   def dumpWaits(): Unit = println(toString)
 
   override def toString: String = {
-    val builder = new StringBuilder("digraph waits {\n")
+    val builder = new StringBuilder()
+
+    /*builder.append("digraph waits {\n")
 
     for (i ← assembly.stages.indices)
       builder.append(s"""N$i [label="${assembly.stages(i)}"]""" + "\n")
@@ -908,7 +910,7 @@ final class GraphInterpreter(
       builder.append("\n")
     }
 
-    builder.append("}\n")
+    builder.append("}\n")*/
     builder.append(s"// $queueStatus (running=$runningStages, shutdown=${shutdownCounter.mkString(",")})")
     builder.toString()
   }

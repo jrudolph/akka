@@ -6,3 +6,5 @@ OSGi.remote
 Dependencies.remote
 
 parallelExecution in Test := false
+
+libraryDependencies += "org.hdrhistogram"            % "HdrHistogram"                 % "2.1.9"
