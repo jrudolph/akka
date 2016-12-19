@@ -45,11 +45,7 @@ import akka.remote.transport.AkkaPduProtobufCodec
 import akka.remote.transport.ThrottlerTransportAdapter.Blackhole
 import akka.remote.transport.ThrottlerTransportAdapter.SetThrottle
 import akka.remote.transport.ThrottlerTransportAdapter.Unthrottled
-import akka.stream.AbruptTerminationException
-import akka.stream.ActorMaterializer
-import akka.stream.KillSwitches
-import akka.stream.Materializer
-import akka.stream.SharedKillSwitch
+import akka.stream._
 import akka.stream.scaladsl.BroadcastHub
 import akka.stream.scaladsl.Flow
 import akka.stream.scaladsl.Keep
@@ -702,6 +698,7 @@ private[remote] class ArteryTransport(_system: ExtendedActorSystem, _provider: R
         val (resourceLife, broadcastHub) =
           source
             .toMat(BroadcastHub.sink(bufferSize = settings.Advanced.InboundBroadcastHubBufferSize))(Keep.both)
+            .addAttributes(ActorAttributes.dispatcher("my-pinned-dispatcher"))
             .run()(materializer)
 
         val lane = inboundSink(envelopeBufferPool)
@@ -716,7 +713,7 @@ private[remote] class ArteryTransport(_system: ExtendedActorSystem, _provider: R
 
         val completedValues: Vector[Future[Done]] =
           (0 until inboundLanes).map { i ⇒
-            broadcastHub.runWith(
+            broadcastHub.addAttributes(ActorAttributes.dispatcher("my-pinned-dispatcher")).runWith(
               // TODO replace filter with "PartitionHub" when that is implemented
               // must use a tuple here because envelope is pooled and must only be touched in the selected lane
               Flow[(OptionVal[ActorRef], InboundEnvelope)].collect {
