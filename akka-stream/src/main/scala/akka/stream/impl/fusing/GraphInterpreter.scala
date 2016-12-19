@@ -4,16 +4,21 @@
 package akka.stream.impl.fusing
 
 import java.util.Arrays
-import akka.actor.ActorRef
+
+import akka.actor.{ ActorCell, ActorRef, LocalActorRef, RepointableActorRef }
 import akka.event.LoggingAdapter
 import akka.stream.stage._
+
 import scala.annotation.tailrec
 import scala.collection.immutable
 import akka.stream._
 import akka.stream.impl.StreamLayout._
 import java.util.concurrent.ThreadLocalRandom
+
 import scala.util.control.NonFatal
 import java.{ util ⇒ ju }
+
+import akka.dispatch.UnboundedMailbox
 import akka.stream.impl.fusing.GraphStages.MaterializedValueSource
 
 /**
@@ -395,6 +400,7 @@ final class GraphInterpreter(
   val logics:           Array[GraphStageLogic], // Array of stage logics
   val connections:      Array[GraphInterpreter.Connection],
   val onAsyncInput:     (GraphStageLogic, Any, (Any) ⇒ Unit) ⇒ Unit,
+  val asyncQueueSize:   () ⇒ Int,
   val fuzzingMode:      Boolean,
   val context:          ActorRef) {
   import GraphInterpreter._
@@ -435,7 +441,7 @@ final class GraphInterpreter(
       val conn = eventQueue(idx & mask)
       conn
     })
-    s"(${eventQueue.length}, $queueHead, $queueTail)(${contents.mkString(", ")})"
+    s"(${eventQueue.length}, $queueHead, $queueTail, ${queueHead - queueTail})(${contents.mkString(", ")})"
   }
   private[this] var _Name: String = _
   def Name: String =
@@ -878,7 +884,9 @@ final class GraphInterpreter(
   def dumpWaits(): Unit = println(toString)
 
   override def toString: String = {
-    val builder = new StringBuilder("digraph waits {\n")
+    val builder = new StringBuilder()
+
+    /*builder.append("digraph waits {\n")
 
     for (i ← assembly.stages.indices)
       builder.append(s"""N$i [label="${assembly.stages(i)}"]""" + "\n")
@@ -908,8 +916,12 @@ final class GraphInterpreter(
       builder.append("\n")
     }
 
-    builder.append("}\n")
-    builder.append(s"// $queueStatus (running=$runningStages, shutdown=${shutdownCounter.mkString(",")})")
+    builder.append("}\n")*/
+    val numMsgs = context.asInstanceOf[RepointableActorRef].underlying.numberOfMessages
+    val queue = context.asInstanceOf[RepointableActorRef].underlying.asInstanceOf[ActorCell].mailbox.messageQueue.asInstanceOf[UnboundedMailbox.MessageQueue]
+    import scala.collection.JavaConverters._
+
+    builder.append(s"// $queueStatus shortCircuitBuffer size: ${asyncQueueSize()} numMsgs: $numMsgs queued: [${queue.asScala.mkString(", ")}] (running=$runningStages, shutdown=${shutdownCounter.mkString(",")})")
     builder.toString()
   }
 }
