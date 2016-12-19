@@ -30,8 +30,9 @@ object MaxThroughputSpec extends MultiNodeConfig {
   commonConfig(debugConfig(on = false).withFallback(
     ConfigFactory.parseString(s"""
        # for serious measurements you should increase the totalMessagesFactor (20)
-       akka.test.MaxThroughputSpec.totalMessagesFactor = 1.0
+       akka.test.MaxThroughputSpec.totalMessagesFactor = 200.0
        akka.test.MaxThroughputSpec.real-message = off
+       akka.testconductor.barrier-timeout = 10 s
        akka {
          loglevel = INFO
          log-dead-letters = 1000000
@@ -57,15 +58,25 @@ object MaxThroughputSpec extends MultiNodeConfig {
 
            # for serious measurements when running this test on only one machine
            # it is recommended to use external media driver
-           # See akka-remote-tests/src/test/resources/aeron.properties
-           #advanced.embedded-media-driver = off
-           #advanced.aeron-dir = "target/aeron"
+           # See akka-remote/src/test/resources/aeron.properties
+           advanced.embedded-media-driver = off
+           advanced.aeron-dir = "/tmp/aeron"
 
            advanced.compression {
              actor-refs.advertisement-interval = 2 second
              manifests.advertisement-interval = 2 second
            }
+
+           advanced {
+             inbound-lanes = 1
+             #buffer-pool-size = 512
+           }
          }
+       }
+       akka.remote.default-remote-dispatcher.fork-join-executor {
+         parallelism-factor = 1.0
+         parallelism-min = 2
+         parallelism-max = 2
        }
        """)).withFallback(RemotingMultiNodeSpec.commonConfig))
 
@@ -98,19 +109,22 @@ object MaxThroughputSpec extends MultiNodeConfig {
         if (printTaskRunnerMetrics)
           taskRunnerMetrics.printHistograms()
         sender() ! EndResult(c)
-        context.stop(self)
+        val s = self
+        context.system.scheduler.scheduleOnce(2.seconds)(s ! PoisonPill)(context.dispatcher)
       case m: Echo ⇒
         sender() ! m
 
     }
   }
 
-  def senderProps(target: ActorRef, testSettings: TestSettings, plotRef: ActorRef,
+  def senderProps(mainTarget: ActorRef, targets: Array[ActorRef], testSettings: TestSettings, plotRef: ActorRef,
                   printTaskRunnerMetrics: Boolean): Props =
-    Props(new Sender(target, testSettings, plotRef, printTaskRunnerMetrics))
+    Props(new Sender(mainTarget, targets, testSettings, plotRef, printTaskRunnerMetrics))
 
-  class Sender(target: ActorRef, testSettings: TestSettings, plotRef: ActorRef, printTaskRunnerMetrics: Boolean)
+  class Sender(target: ActorRef, targets: Array[ActorRef], testSettings: TestSettings, plotRef: ActorRef, printTaskRunnerMetrics: Boolean)
     extends Actor {
+    val numTargets = targets.size
+
     import testSettings._
     val payload = ("0" * testSettings.payloadSize).getBytes("utf-8")
     var startTime = 0L
@@ -212,7 +226,7 @@ object MaxThroughputSpec extends MultiNodeConfig {
           else payload
 
         //        target ! msg
-        target.tell(msg, ActorRef.noSender)
+        targets(i % numTargets).tell(msg, ActorRef.noSender)
         i += 1
       }
       remaining -= batchSize
@@ -309,7 +323,7 @@ abstract class MaxThroughputSpec extends RemotingMultiNodeSpec(MaxThroughputSpec
 
   def identifyReceiver(name: String, r: RoleName = second): ActorRef = {
     system.actorSelection(node(r) / "user" / name) ! Identify(None)
-    expectMsgType[ActorIdentity].ref.get
+    expectMsgType[ActorIdentity](10.seconds).ref.get
   }
 
   val scenarios = List(
@@ -320,7 +334,7 @@ abstract class MaxThroughputSpec extends RemotingMultiNodeSpec(MaxThroughputSpec
       payloadSize = 100,
       senderReceiverPairs = 1,
       realMessage),
-    TestSettings(
+    /*TestSettings(
       testName = "1-to-1",
       totalMessages = adjustedTotalMessages(50000),
       burstSize = 1000,
@@ -340,7 +354,7 @@ abstract class MaxThroughputSpec extends RemotingMultiNodeSpec(MaxThroughputSpec
       burstSize = 1000,
       payloadSize = 10000,
       senderReceiverPairs = 1,
-      realMessage),
+      realMessage),*/
     TestSettings(
       testName = "5-to-5",
       totalMessages = adjustedTotalMessages(20000),
@@ -356,6 +370,8 @@ abstract class MaxThroughputSpec extends RemotingMultiNodeSpec(MaxThroughputSpec
     runPerfFlames(first, second)(delay = 5.seconds, time = 15.seconds)
 
     runOn(second) {
+      println(s"Receiver is multinode.index ${sys.props.get("multinode.index")}")
+
       val rep = reporter(testName)
       for (n ← 1 to senderReceiverPairs) {
         val receiver = system.actorOf(
@@ -368,13 +384,16 @@ abstract class MaxThroughputSpec extends RemotingMultiNodeSpec(MaxThroughputSpec
     }
 
     runOn(first) {
+      println(s"Sender is multinode.index ${sys.props.get("multinode.index")}")
+
       enterBarrier(receiverName + "-started")
       val ignore = TestProbe()
+      val receivers = (for (n ← 1 to senderReceiverPairs) yield identifyReceiver(receiverName + n)).toArray
       val senders = for (n ← 1 to senderReceiverPairs) yield {
-        val receiver = identifyReceiver(receiverName + n)
+        val receiver = receivers(n - 1)
         val plotProbe = TestProbe()
         val snd = system.actorOf(
-          senderProps(receiver, testSettings, plotProbe.ref, printTaskRunnerMetrics = n == 1),
+          senderProps(receiver, receivers, testSettings, plotProbe.ref, printTaskRunnerMetrics = n == 1),
           testName + "-snd" + n)
         val terminationProbe = TestProbe()
         terminationProbe.watch(snd)

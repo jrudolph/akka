@@ -12,3 +12,9 @@ publishArtifact in Compile := false
 
 enablePlugins(MultiNodeScalaTest)
 disablePlugins(MimaPlugin)
+
+jvmOptions in MultiJvm ++= Seq(
+  "-XX:+PreserveFramePointer",
+  "-verbose:gc"
+  //\"-XX:+PrintCompilation"
+)
