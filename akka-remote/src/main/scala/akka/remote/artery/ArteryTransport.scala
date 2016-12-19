@@ -327,6 +327,7 @@ private[remote] class ArteryTransport(_system: ExtendedActorSystem, _provider: R
   private val testState = new SharedTestState
 
   private val inboundLanes = settings.Advanced.InboundLanes
+  private val useAsync = true //sys.props("multinode.index").toInt == 0 //settings.Advanced.InboundLanes < 0
 
   // TODO use WildcardIndex.isEmpty when merged from master
   val largeMessageChannelEnabled =
@@ -685,7 +686,7 @@ private[remote] class ArteryTransport(_system: ExtendedActorSystem, _provider: R
   private def runInboundOrdinaryMessagesStream(compression: InboundCompressions): Unit = {
     if (isShutdown) throw ShuttingDown
     val (resourceLife, completed) =
-      if (inboundLanes == 1) {
+      if (inboundLanes == 1 && !useAsync) {
         aeronSource(ordinaryStreamId, envelopeBufferPool)
           .via(inboundFlow(compression))
           .toMat(inboundSink(envelopeBufferPool))(Keep.both)
