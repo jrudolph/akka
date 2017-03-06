@@ -7,7 +7,8 @@ import akka.actor.ActorSystem
 import akka.stream._
 import akka.stream.impl.StreamLayout.AtomicModule
 import akka.stream.TLSProtocol._
-import akka.stream.impl.TraversalBuilder
+import akka.stream.impl.{ TlsModuleIslandTag, TraversalBuilder }
+import akka.stream.scaladsl.Keep
 import akka.util.ByteString
 import com.typesafe.sslconfig.akka.AkkaSSLConfig
 
@@ -29,7 +30,7 @@ private[stream] final case class TlsModule(plainIn: Inlet[SslTlsOutbound], plain
 
   override def toString: String = f"TlsModule($closing) [${System.identityHashCode(this)}%08x]"
 
-  override private[stream] def traversalBuilder = TraversalBuilder.atomic(this)
+  override private[stream] def traversalBuilder = TraversalBuilder.atomic(this).makeIsland(TlsModuleIslandTag)
 }
 
 /**

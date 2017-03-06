@@ -1,7 +1,7 @@
 package akka.stream.impl
 
 import java.util.ArrayList
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.{ AtomicBoolean, AtomicLong }
 
 import akka.NotUsed
 import akka.actor.{ ActorContext, ActorRef, ActorRefFactory, ActorSystem, Cancellable, Deploy, ExtendedActorSystem, PoisonPill, Props }
@@ -13,6 +13,7 @@ import akka.stream.impl.StreamLayout.AtomicModule
 import akka.stream.impl.fusing.ActorGraphInterpreter.{ ActorOutputBoundary, BatchingActorInputBoundary }
 import akka.stream.impl.fusing.GraphInterpreter.Connection
 import akka.stream.impl.fusing._
+import akka.stream.impl.io.{ TLSActor, TlsModule }
 import akka.stream.stage.{ GraphStageLogic, InHandler, OutHandler }
 import org.reactivestreams.{ Processor, Publisher, Subscriber, Subscription }
 
@@ -42,6 +43,10 @@ object PhasedFusingActorMaterializer {
     ProcessorModuleIslandTag → new Phase[Any] {
       override def apply(settings: ActorMaterializerSettings, materializer: PhasedFusingActorMaterializer): PhaseIsland[Any] =
         new ProcessorModulePhase(materializer).asInstanceOf[PhaseIsland[Any]]
+    },
+    TlsModuleIslandTag → new Phase[Any] {
+      def apply(settings: ActorMaterializerSettings, materializer: PhasedFusingActorMaterializer): PhaseIsland[Any] =
+        new TlsModulePhase(materializer).asInstanceOf[PhaseIsland[Any]]
     },
     GraphStageTag → DefaultPhase
   )
@@ -232,7 +237,7 @@ class IslandTracking(
       } else {
         if (Debug) println(s"    cross island forward wiring from port ${forwardWire.from} wired to local slot = $localInSlot")
         val publisher = forwardWire.phase.createPublisher(forwardWire.from, forwardWire.outStage)
-        currentPhase.takePublisher(localInSlot, publisher)
+        currentPhase.takePublisher(localInSlot, publisher, logic)
       }
     }
 
@@ -276,7 +281,7 @@ class IslandTracking(
         } else {
           if (Debug) println(s"    cross-island wiring to local slot $localInSlot in target island")
           val publisher = currentPhase.createPublisher(out, logic)
-          targetSegment.phase.takePublisher(localInSlot, publisher)
+          targetSegment.phase.takePublisher(localInSlot, publisher, logic)
         }
       }
     } else {
@@ -508,7 +513,9 @@ trait PhaseIsland[M] {
 
   def createPublisher(out: OutPort, logic: M): Publisher[Any]
 
-  def takePublisher(slot: Int, publisher: Publisher[Any]): Unit
+  def takePublisher(slot: Int, publisher: Publisher[Any], logic: M): Unit = takePublisher(slot, publisher)
+
+  protected def takePublisher(slot: Int, publisher: Publisher[Any]): Unit
 
   def onIslandReady(): Unit
 
@@ -723,4 +730,73 @@ final class ProcessorModulePhase(materializer: PhasedFusingActorMaterializer) ex
   override def takePublisher(slot: Int, publisher: Publisher[Any]): Unit = publisher.subscribe(processor)
 
   override def onIslandReady(): Unit = ()
+}
+
+object TlsModuleIslandTag extends IslandTag
+
+final class TlsModulePhase(materializer: PhasedFusingActorMaterializer) extends PhaseIsland[TlsModulePhase.MaterializedInfo] {
+  import TlsModulePhase._
+
+  def name: String = "TlsModulePhase"
+
+  def materializeAtomic(mod: AtomicModule[Shape, Any], attributes: Attributes): (MaterializedInfo, Any) = {
+    val es = materializer.effectiveSettings(attributes)
+    println(mod)
+    val tls = mod.asInstanceOf[TlsModule]
+
+    val props = TLSActor.props(materializer.settings, tls.createSSLEngine, tls.verifySession, tls.closing)
+    val impl = materializer.actorOf(props, s"tls-${nextId()}", es.dispatcher)
+    def factory(id: Int) = new ActorPublisher[Any](impl) {
+      override val wakeUpMsg = FanOut.SubstreamSubscribePending(id)
+    }
+    val publishers = Vector.tabulate(2)(factory)
+    impl ! FanOut.ExposedPublishers(publishers)
+
+    /*    assignPort(tls.plainOut, publishers(TLSActor.UserOut))
+    assignPort(tls.cipherOut, publishers(TLSActor.TransportOut))
+
+    assignPort(tls.plainIn, FanIn.SubInput[Any](impl, TLSActor.UserIn))
+    assignPort(tls.cipherIn, FanIn.SubInput[Any](impl, TLSActor.TransportIn))*/
+
+    //matVal.put(atomic, NotUsed)
+    (MaterializedInfo(
+      tls,
+      impl,
+      Seq(
+        tls.plainOut → publishers(TLSActor.UserOut),
+        tls.cipherOut → publishers(TLSActor.TransportOut)
+      )
+    ), NotUsed)
+  }
+  def assignPort(in: InPort, slot: Int, logic: MaterializedInfo): Unit = logic.assignPort(in, slot)
+  def assignPort(out: OutPort, slot: Int, logic: MaterializedInfo): Unit = ()
+
+  def createPublisher(out: OutPort, logic: MaterializedInfo): Publisher[Any] =
+    logic.outPorts.find(_._1 == out).get._2
+
+  protected def takePublisher(slot: Int, publisher: Publisher[Any]): Unit = ???
+
+  override def takePublisher( /*in: InPort, */ slot: Int, publisher: Publisher[Any], logic: MaterializedInfo): Unit = {
+    val in = logic.slots.find(_._1 == slot).get._2
+    val subscriber =
+      if (in == logic.tls.plainIn) FanIn.SubInput[Any](logic.actorRef, TLSActor.UserIn)
+      else /* in == logic.tls.cipherIn */ FanIn.SubInput[Any](logic.actorRef, TLSActor.TransportIn)
+
+    publisher.subscribe(subscriber)
+  }
+
+  def onIslandReady(): Unit = ()
+}
+object TlsModulePhase {
+  case class MaterializedInfo(
+    tls:      TlsModule,
+    actorRef: ActorRef,
+    outPorts: Seq[(OutPort, Publisher[Any])]) {
+    var slots = List.empty[(Int, InPort)]
+
+    def assignPort(in: InPort, slot: Int) = slots ::= slot → in
+  }
+
+  private[this] val ids = new AtomicLong()
+  def nextId(): Long = ids.incrementAndGet()
 }
