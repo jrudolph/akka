@@ -19,7 +19,7 @@ object GraphInterpreter {
   /**
    * Compile time constant, enable it for debug logging to the console.
    */
-  final val Debug = false
+  final val Debug = true
 
   final val NoEvent = null
 
@@ -74,18 +74,32 @@ object GraphInterpreter {
    * @param outHandler The handler that contains the callback for output events.
    */
   final class Connection(
-    var id:         Int,
-    var inOwnerId:  Int,
-    var inOwner:    GraphStageLogic,
-    var outOwnerId: Int,
-    var outOwner:   GraphStageLogic,
-    var inHandler:  InHandler,
-    var outHandler: OutHandler
+    var id:          Int,
+    var inOwnerId:   Int,
+    var inOwner:     GraphStageLogic,
+    var outOwnerId:  Int,
+    var outOwner:    GraphStageLogic,
+    var inHandler:   InHandler,
+    var outHandler:  OutHandler,
+    var inInletId:   Int             = -1,
+    var outOutletId: Int             = -1
   ) {
     var portState: Int = InReady
     var slot: Any = Empty
 
-    override def toString = s"Connection($id, $portState, $slot, $inHandler, $outHandler)"
+    def portStateToString: String = {
+      def isSet(flag: Int, text: String): String = if ((portState & flag) != 0) text else ""
+
+      Seq(
+        InReady → "InReady",
+        Pulling → "Pulling",
+        Pushing → "Pushing",
+        OutReady → "OutReady",
+        InClosed → "InClosed",
+        OutClosed → "OutClosed",
+        InFailed → "InFailed").map((isSet _).tupled).filter(_.nonEmpty).mkString(" ")
+    }
+    override def toString = s"Connection($id, $portStateToString, $slot, $inHandler, $outHandler)"
   }
 
   /**
@@ -595,6 +609,7 @@ final class GraphInterpreter(
   }
 
   private[stream] def fail(connection: Connection, ex: Throwable): Unit = {
+    ex.printStackTrace()
     val currentState = connection.portState
     if (Debug) println(s"$Name   fail($connection, $ex) [$currentState]")
     connection.portState = currentState | OutClosed

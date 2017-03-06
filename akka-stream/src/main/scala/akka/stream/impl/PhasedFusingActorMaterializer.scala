@@ -24,7 +24,7 @@ import scala.util.Random
 
 object PhasedFusingActorMaterializer {
 
-  val Debug = false
+  val Debug = true
 
   val DefaultPhase: Phase[Any] = new Phase[Any] {
     override def apply(settings: ActorMaterializerSettings, materializer: PhasedFusingActorMaterializer): PhaseIsland[Any] =

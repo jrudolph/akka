@@ -53,6 +53,8 @@ final case class Map[In, Out](f: In ⇒ Out) extends GraphStage[FlowShape[In, Ou
 
       setHandlers(in, out, this)
     }
+
+  override def toString: String = s"Map(${f.getClass})"
 }
 
 /**
