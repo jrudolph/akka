@@ -1,5 +1,7 @@
 package akka.stream.scaladsl
 
+import akka.actor.{ Actor, ActorRef, ActorSystem, Props }
+
 import scala.collection.mutable
 import akka.{ Done, NotUsed }
 import akka.dispatch.ExecutionContexts
@@ -7,7 +9,8 @@ import akka.event.NoLogging
 import akka.stream._
 import akka.stream.impl.fusing.GraphInterpreter.Connection
 import akka.stream.impl.fusing.{ GraphInterpreter, GraphStages, Map }
-import akka.stream.stage._
+import akka.stream.scaladsl.Materializer.InterpreterCons
+import akka.stream.stage.{ GraphStageLogic, _ }
 
 import scala.annotation.unchecked.uncheckedVariance
 import scala.collection.immutable.VectorBuilder
@@ -18,6 +21,9 @@ trait MaterializationContext {
 
   def addGraphStageLogic(logic: GraphStageLogic, shape: Shape): Unit
   def addConnection[T](out: Outlet[T], in: Inlet[T]): Unit
+
+  def actorOf(props: Props): ActorRef
+  def system: ActorSystem
 }
 
 trait PreMaterializationContext {
@@ -31,7 +37,6 @@ trait MaterializationSession
 
 abstract class SimpleGraph[+S <: Shape, +M] {
   type Shape = S @uncheckedVariance
-  //def shape: S
   def materialize(ctx: MaterializationContext): (S, M)
 
   def preMaterialize(ctx: PreMaterializationContext): (S, MaterializationSession ⇒ M)
@@ -91,6 +96,17 @@ case class SourceViaGraph[Out, Out2, M1, M2, M3](source: SimpleGraph[SourceShape
   }
 }
 
+case class FlowAndSink[In, Out, M1, M2, M3](flow: SimpleGraph[FlowShape[In, Out], M1], sink: SimpleGraph[SinkShape[Out], M2], combineMat: (M1, M2) ⇒ M3) extends SimpleGraph[SinkShape[In], M3] {
+  def materialize(ctx: MaterializationContext): (SinkShape[In], M3) = {
+    val (s1, m1) = flow.materialize(ctx)
+    val (s2, m2) = sink.materialize(ctx)
+    ctx.addConnection(s1.out, s2.in)
+    (SinkShape(s1.in), combineMat(m1, m2))
+  }
+
+  def preMaterialize(ctx: PreMaterializationContext): (SinkShape[In], (MaterializationSession) ⇒ M3) = ???
+}
+
 case class SourceAndSink[T, M1, M2, M3](source: SimpleGraph[SourceShape[T], M1], sink: SimpleGraph[SinkShape[T], M2], combineMat: (M1, M2) ⇒ M3) extends SimpleGraph[ClosedShape, M3] {
   def preMaterialize(ctx: PreMaterializationContext): (ClosedShape, (MaterializationSession) ⇒ M3) = {
     val (srcShape, m1) = source.preMaterialize(ctx)
@@ -107,15 +123,144 @@ case class SourceAndSink[T, M1, M2, M3](source: SimpleGraph[SourceShape[T], M1],
   }
 }
 
+case class SealSink[In, M](inner: SimpleGraph[SinkShape[In], M]) extends SimpleGraph[SinkShape[In], M] {
+  val sealedGraph = SourceAndSink(StageGraph(new InputBoundary[In]), inner, Keep.both[(SinkShape[In], GraphStageLogic), M])
+
+  def materialize(ctx: MaterializationContext): (SinkShape[In], M) = {
+    val (((shape, logic), m), interpreterCons) = Materializer.run(sealedGraph, ctx.system)
+
+    ctx.actorOf(Props(new InterpreterActor(interpreterCons)))
+
+    ctx.addGraphStageLogic(logic, shape)
+    (shape, m)
+  }
+
+  def preMaterialize(ctx: PreMaterializationContext): (SinkShape[In], (MaterializationSession) ⇒ M) = ???
+
+  class InputBoundary[T] extends GraphStageWithMaterializedValue[SourceShape[T], (SinkShape[T], GraphStageLogic)] {
+    val out = Outlet[T]("InputBoundary.out")
+    val in = Inlet[T]("InputBoundary.in")
+
+    def shape: SourceShape[T] = SourceShape(out)
+
+    def createLogicAndMaterializedValue(inheritedAttributes: Attributes): (GraphStageLogic, (SinkShape[T], GraphStageLogic)) = {
+      val sinkShape = SinkShape(in)
+      object SourceLogic extends GraphStageLogic(shape) with OutHandler {
+        def pushAsync(element: T): Unit = runAsync(push(out, element))
+        def completeAsync(): Unit = runAsync(completeStage())
+        def failAsync(ex: Throwable): Unit = runAsync(failStage(ex))
+
+        def runAsync(body: ⇒ Unit): Unit =
+          // FIXME: we need to make sure this methods is only called when the logic was initialized
+          getAsyncCallback[AnyRef](_ ⇒ body).invoke(null)
+
+        sealed trait State
+        case class WaitingForReady(ex: Seq[() ⇒ Unit]) extends State
+        case object Ready extends State
+
+        var state: State = WaitingForReady(Nil)
+        def setReadyAsync(): Unit = runAsync {
+          val fs = state.asInstanceOf[WaitingForReady].ex
+          println(s"Now ready, running ${fs.size} methods")
+          fs.foreach(_())
+          state = Ready
+        }
+        def execute(body: ⇒ Unit): Unit =
+          state match {
+            case WaitingForReady(ex) ⇒ state = WaitingForReady(ex :+ (body _))
+            case Ready               ⇒ body
+          }
+
+        setHandler(out, this)
+
+        def onPull(): Unit = execute(SinkLogic.pullAsync())
+        override def onDownstreamFinish(): Unit = execute(SinkLogic.cancelAsync())
+      }
+      object SinkLogic extends GraphStageLogic(sinkShape) with InHandler {
+        def pullAsync(): Unit = runAsync {
+          println("pulling")
+          pull(in)
+        }
+        def cancelAsync(): Unit = runAsync {
+          println("cancelling")
+          cancel(in)
+        }
+        def runAsync(body: ⇒ Unit): Unit = getAsyncCallback[AnyRef](_ ⇒ body).invoke(null)
+
+        override def preStart(): Unit = {
+          setHandler(in, this)
+          SourceLogic.setReadyAsync()
+        }
+
+        def onPush(): Unit = SourceLogic.pushAsync(grab(in))
+        override def onUpstreamFinish(): Unit = SourceLogic.completeAsync()
+        override def onUpstreamFailure(ex: Throwable): Unit = SourceLogic.failAsync(ex)
+      }
+
+      (SourceLogic, (SinkShape(in), SinkLogic))
+    }
+  }
+}
+
+/*case class SealFlow[In, Out, M](inner: SimpleGraph[FlowShape[In, Out] ,M]) extends SimpleGraph[FlowShape[In, Out] ,M] {
+  def materialize(ctx: MaterializationContext): (FlowShape[In, Out], M) = {
+
+  }
+
+  def preMaterialize(ctx: PreMaterializationContext): (FlowShape[In, Out], (MaterializationSession) => M) = ???
+
+
+}*/
+
+/*
+case class JoinAmorphous[M1, M2, M3](first: SimpleGraph[_, M1], second: SimpleGraph[_, M2], combineMat: (M1, M2) ⇒ M3) extends SimpleGraph[ClosedShape, M3] {
+  def materialize(ctx: MaterializationContext): (ClosedShape, M3) = ???
+
+  def preMaterialize(ctx: PreMaterializationContext): (ClosedShape, (MaterializationSession) ⇒ M3) = ???
+}
+
 /**
  * Seals a given graph, i.e. it connects all open inlets and outlets in the shape to an asynchronous boundary that
  * is connected to newly created inlets and outlets that are themselves connected to asynchronous boundaries.
  */
-abstract class SealAsync[+S <: Shape, +M](inner: SimpleGraph[S, M]) extends SimpleGraph[S, M] {
-  //def materialize(ctx: MaterializationContext,connectRest: (S, MaterializationContext) ⇒ MaterializationContext): M = ???
+case class SealAsync[S <: Shape, M](inner: SimpleGraph[S, M]) extends SimpleGraph[S, M] {
+  def materialize(ctx: MaterializationContext): (S, M) = {
+    val (innerShape, innerMat) = inner.materialize(ctx)
+
+    val async = new AsyncBoundaryStage(innerShape)
+    val (logic, newShape) = async.createLogicAndMaterializedValue(ctx.attributes)
+    ctx.addGraphStageLogic(logic, async.shape)
+    (async.shape.outlets, innerShape.inlets).zipped.foreach((o, i) ⇒ ctx.addConnection(o.asInstanceOf[Outlet[AnyRef]], i.asInstanceOf[Inlet[AnyRef]]))
+    (innerShape.outlets, async.shape.inlets).zipped.foreach((o, i) ⇒ ctx.addConnection(o.asInstanceOf[Outlet[AnyRef]], i.asInstanceOf[Inlet[AnyRef]]))
+
+    (newShape, innerMat)
+  }
+
+  def recreateShapeShape(original: S, newShape: AmorphousShape): S = (original match {
+    case SourceShape(out)   ⇒ SourceShape(newShape.outlets(0))
+    case FlowShape(in, out) ⇒ FlowShape(newShape.inlets(0), newShape.outlets(0))
+    case SinkShape(in)      ⇒ SinkShape(newShape.inlets(0))
+  }).asInstanceOf[S]
+
+  class AsyncBoundaryStage(counterpart: S) extends GraphStageWithMaterializedValue[AmorphousShape, Shape] {
+    val shape: AmorphousShape =
+      AmorphousShape(
+        counterpart.outlets.map(o ⇒ Inlet[Any](o.s + "-counterpart")),
+        counterpart.inlets.map(i ⇒ Outlet[Any](i.s + "-counterpart"))
+      )
+
+    def createLogicAndMaterializedValue(inheritedAttributes: Attributes): (GraphStageLogic, S) = {
+      null
+    }
+  }
+
+  def preMaterialize(ctx: PreMaterializationContext): (S, (MaterializationSession) ⇒ M) = ???
 }
+*/
 
 object Materializer {
+  type InterpreterCons = ((GraphStageLogic, Any, (Any) ⇒ Unit) ⇒ Unit, ActorRef) ⇒ GraphInterpreter
+
   def initializeShape(shape: Shape): Unit = {
     var i = 0
     while (i < shape.inlets.size) {
@@ -130,7 +275,7 @@ object Materializer {
     }
   }
 
-  def run[M](runnableGraph: SimpleGraph[ClosedShape, M]): (M, GraphInterpreter) = {
+  def run[M](runnableGraph: SimpleGraph[ClosedShape, M], _system: ActorSystem): (M, InterpreterCons) = {
     class MaterializationContextImpl extends MaterializationContext {
       def attributes: Attributes = Attributes.none
 
@@ -166,6 +311,9 @@ object Materializer {
 
         nextConnectionId += 1
       }
+
+      def system: ActorSystem = _system
+      def actorOf(props: Props): ActorRef = _system.actorOf(props)
     }
 
     val ctx = new MaterializationContextImpl
@@ -181,25 +329,28 @@ object Materializer {
 
     val connections = ctx.connections.result().toArray // FIXME: optimize
 
-    val interpreter =
-      new GraphInterpreter(
-        NoMaterializer,
-        NoLogging,
-        logics,
-        connections,
-        (_, _, _) ⇒ throw new IllegalStateException("async input not allowed"),
-        fuzzingMode = false,
-        null
-      )
+    val interpreterCons: InterpreterCons = { (onAsyncInput, contextActorRef) ⇒
+      val interpreter =
+        new GraphInterpreter(
+          NoMaterializer,
+          NoLogging,
+          logics,
+          connections,
+          onAsyncInput,
+          fuzzingMode = false,
+          contextActorRef
+        )
 
-    connections.foreach { c ⇒
-      c.inHandler = c.inOwner.handlers(c.inInletId).asInstanceOf[InHandler]
-      c.outHandler = c.outOwner.handlers(c.outOutletId + c.outOwner.inCount).asInstanceOf[OutHandler]
+      connections.foreach { c ⇒
+        c.inHandler = c.inOwner.handlers(c.inInletId).asInstanceOf[InHandler]
+        c.outHandler = c.outOwner.handlers(c.outOutletId + c.outOwner.inCount).asInstanceOf[OutHandler]
+      }
+
+      interpreter.init(null)
+      interpreter
     }
 
-    interpreter.init(null)
-
-    (mat, interpreter)
+    (mat, interpreterCons)
   }
 
   def preMaterialize[M](runnableGraph: SimpleGraph[ClosedShape, M]): () ⇒ (M, GraphInterpreter) = {
@@ -308,26 +459,53 @@ object Materializer {
 
 object MaterializedGraphInterpreterTest extends App {
   val singleSource = new GraphStages.SingleSource("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXx")
-  val map = new Map[AnyRef, AnyRef]({ x ⇒ println(x); x })
+  val map = new Map[AnyRef, AnyRef]({ x ⇒ println(s"${Thread.currentThread().getName} $x"); x })
   val ignoreSink = GraphStages.IgnoreSink
 
   val mapFlow = StageGraph(map)
 
-  val runnable =
+  val runnableTwoMaps =
     SourceAndSink(
-      /*SourceViaGraph(*/
-      SourceViaGraph(StageGraph(singleSource), mapFlow, Keep.none) /*, mapFlow, Keep.none)*/ ,
+      SourceViaGraph(
+        SourceViaGraph(StageGraph(singleSource), mapFlow, Keep.none), mapFlow, Keep.none),
       StageGraph(ignoreSink),
       Keep.right[NotUsed, Future[Done]]
     )
 
-  val (result, interpreter) = Materializer.preMaterialize(runnable)()
+  val runnablePrintlnOtherThread =
+    SourceAndSink(
+      StageGraph(singleSource),
+      SealSink(
+        FlowAndSink(
+          mapFlow,
+          StageGraph(ignoreSink),
+          Keep.right[NotUsed, Future[Done]]
+        )),
+      Keep.right[NotUsed, Future[Done]]
+    )
 
-  var remainingSteps = 10
-  while (!interpreter.isCompleted && remainingSteps > 0) {
-    interpreter.execute(1)
-    remainingSteps -= 1
-    println(s"isCompleted: ${interpreter.isCompleted} remaining: $remainingSteps")
+  val system = ActorSystem()
+
+  try {
+    //val (result, interpreter) = Materializer.preMaterialize(runnablePrintlnOtherThread)()
+    val (result, interpreterCons) = Materializer.run(runnablePrintlnOtherThread, system)
+
+    system.actorOf(Props(new InterpreterActor(interpreterCons)))
+    result.onComplete { res ⇒
+      println(res)
+      system.terminate()
+    }(system.dispatcher)
+
+    /*val interpreter = interpreterCons((_, _, _) ⇒ throw new IllegalStateException("async input not allowed"), null)
+
+    var remainingSteps = 10
+    while (!interpreter.isCompleted && remainingSteps > 0) {
+      interpreter.execute(1)
+      remainingSteps -= 1
+      println(s"isCompleted: ${interpreter.isCompleted} remaining: $remainingSteps")
+    }*/
+  } catch {
+    case _ ⇒ system.terminate()
   }
 }
 
@@ -389,5 +567,28 @@ object ManualGraphInterpreterTest extends App {
     interpreter.execute(1)
     remainingSteps -= 1
     println(s"isCompleted: ${interpreter.isCompleted} remaining: $remainingSteps")
+  }
+}
+
+case class Async(logic: GraphStageLogic, element: Any, handler: Any ⇒ Unit)
+case object Resume
+class InterpreterActor(cons: InterpreterCons) extends Actor {
+  val interpreter = cons(defer, self)
+
+  def defer(logic: GraphStageLogic, element: Any, handler: Any ⇒ Unit): Unit = self ! Async(logic, element, handler)
+
+  override def preStart(): Unit = self ! Resume
+
+  def receive = {
+    case Async(logic, element, handler) ⇒
+      interpreter.runAsyncInput(logic, element, handler)
+      run()
+    case Resume ⇒ run()
+  }
+
+  def run(): Unit = {
+    interpreter.execute(50)
+    if (interpreter.isCompleted) context.stop(self)
+    else if (interpreter.isSuspended) self ! Resume
   }
 }
