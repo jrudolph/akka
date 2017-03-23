@@ -51,20 +51,23 @@ object IntroSpec {
     //#chatroom-behavior
 
     def chatRoom(sessions: List[ActorRef[SessionEvent]] = List.empty): Behavior[Command] =
-      Stateful[Command] { (ctx, msg) ⇒
+      Stateful[Command]({ (ctx, msg) ⇒
         msg match {
           case GetSession(screenName, client) ⇒
             val wrapper = ctx.spawnAdapter {
               p: PostMessage ⇒ PostSessionMessage(screenName, p.message)
             }
             client ! SessionGranted(wrapper)
+            ctx.watch(client)
             chatRoom(client :: sessions)
           case PostSessionMessage(screenName, message) ⇒
             val mp = MessagePosted(screenName, message)
             sessions foreach (_ ! mp)
             Same
         }
-      }
+      },{
+        case Terminated(ref) => chatRoom(sessions.filterNot(_ == ref))
+      })
     //#chatroom-behavior
   }
   //#chatroom-actor
