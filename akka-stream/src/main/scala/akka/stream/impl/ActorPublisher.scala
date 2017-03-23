@@ -48,15 +48,17 @@ class ActorPublisher[T](val impl: ActorRef) extends Publisher[T] {
   protected val wakeUpMsg: Any = SubscribePending
 
   override def subscribe(subscriber: Subscriber[_ >: T]): Unit = {
+    println(s"Got subscribe for  [$name] $this")
     requireNonNullSubscriber(subscriber)
     @tailrec def doSubscribe(): Unit = {
       val current = pendingSubscribers.get
       if (current eq null)
         reportSubscribeFailure(subscriber)
       else {
-        if (pendingSubscribers.compareAndSet(current, subscriber +: current))
+        if (pendingSubscribers.compareAndSet(current, subscriber +: current)) {
           impl ! wakeUpMsg
-        else
+          println(s"[$name] Sent $wakeUpMsg, there are now these subs: $subscriber old: $current")
+        } else
           doSubscribe() // CAS retry
       }
     }
@@ -66,12 +68,17 @@ class ActorPublisher[T](val impl: ActorRef) extends Publisher[T] {
 
   def takePendingSubscribers(): immutable.Seq[Subscriber[_ >: T]] = {
     val pending = pendingSubscribers.getAndSet(Nil)
+    println(s"[$name] taking pending subs: $pending")
     if (pending eq null) Nil else pending.reverse
   }
 
+  private val name: String = s"[${System.identityHashCode(this) formatted "%08x"}]"
   def shutdown(reason: Option[Throwable]): Unit = {
+    println(s"Shutting down subscriber [$name]")
     shutdownReason = reason
-    pendingSubscribers.getAndSet(null) match {
+    val pending = pendingSubscribers.getAndSet(null)
+    println(s"Got these pending subs [$name]: $pending")
+    pending match {
       case null    ⇒ // already called earlier
       case pending ⇒ pending foreach reportSubscribeFailure
     }

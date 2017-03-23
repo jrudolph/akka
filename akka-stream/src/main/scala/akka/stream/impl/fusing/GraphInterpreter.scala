@@ -25,7 +25,7 @@ object GraphInterpreter {
   /**
    * Compile time constant, enable it for debug logging to the console.
    */
-  final val Debug = false
+  final val Debug = true
 
   final val NoEvent = null
   final val Boundary = -1

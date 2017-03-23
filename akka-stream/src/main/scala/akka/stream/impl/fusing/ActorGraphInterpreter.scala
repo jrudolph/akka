@@ -45,7 +45,7 @@ final case class GraphModule(assembly: GraphAssembly, shape: Shape, attributes: 
  * INTERNAL API
  */
 object ActorGraphInterpreter {
-  trait BoundaryEvent extends DeadLetterSuppression with NoSerializationVerificationNeeded {
+  trait BoundaryEvent /*extends DeadLetterSuppression */ extends NoSerializationVerificationNeeded {
     def shell: GraphInterpreterShell
   }
 
@@ -56,7 +56,7 @@ object ActorGraphInterpreter {
 
   final case class RequestMore(shell: GraphInterpreterShell, id: Int, demand: Long) extends BoundaryEvent
   final case class Cancel(shell: GraphInterpreterShell, id: Int) extends BoundaryEvent
-  final case class SubscribePending(shell: GraphInterpreterShell, id: Int) extends BoundaryEvent
+  case class SubscribePending(shell: GraphInterpreterShell, id: Int) extends BoundaryEvent
   final case class ExposedPublisher(shell: GraphInterpreterShell, id: Int, publisher: ActorPublisher[Any]) extends BoundaryEvent
 
   final case class AsyncInput(shell: GraphInterpreterShell, logic: GraphStageLogic, evt: Any, handler: (Any) ⇒ Unit) extends BoundaryEvent
@@ -64,8 +64,10 @@ object ActorGraphInterpreter {
   case class Resume(shell: GraphInterpreterShell) extends BoundaryEvent
   case class Abort(shell: GraphInterpreterShell) extends BoundaryEvent
 
-  final class BoundaryPublisher(parent: ActorRef, shell: GraphInterpreterShell, id: Int) extends ActorPublisher[Any](parent) {
-    override val wakeUpMsg = ActorGraphInterpreter.SubscribePending(shell, id)
+  final class BoundaryPublisher(parent: ActorRef, shell: GraphInterpreterShell, id: Int) extends ActorPublisher[Any](parent) { pub ⇒
+    override val wakeUpMsg = new ActorGraphInterpreter.SubscribePending(shell, id) {
+      override def toString: String = s"[${System.identityHashCode(pub) formatted "%02x"}] " + super.toString
+    }
   }
 
   final class BoundarySubscription(parent: ActorRef, shell: GraphInterpreterShell, id: Int) extends Subscription {
@@ -79,12 +81,16 @@ object ActorGraphInterpreter {
       ReactiveStreamsCompliance.requireNonNullException(cause)
       parent ! OnError(shell, id, cause)
     }
-    override def onComplete(): Unit = parent ! OnComplete(shell, id)
+    override def onComplete(): Unit = {
+      println(s"Got onComplete for subscriber $id of shell [${shell.self}]")
+      parent ! OnComplete(shell, id)
+    }
     override def onNext(element: Any): Unit = {
       ReactiveStreamsCompliance.requireNonNullElement(element)
       parent ! OnNext(shell, id, element)
     }
     override def onSubscribe(subscription: Subscription): Unit = {
+      println(s"Got subscriptiong for subscriber $id of shell [${shell.self}]")
       ReactiveStreamsCompliance.requireNonNullSubscription(subscription)
       parent ! OnSubscribe(shell, id, subscription)
     }
@@ -110,6 +116,13 @@ object ActorGraphInterpreter {
 
     val out: Outlet[Any] = Outlet[Any]("UpstreamBoundary" + id)
     out.id = 0
+
+    var contextRef: ActorRef = _
+
+    /**
+     * Invoked before any external events are processed, at the startup of the stage.
+     */
+    override def preStart(): Unit = contextRef = GraphInterpreter.currentInterpreter.context
 
     private def dequeue(): Any = {
       val elem = inputBuffer(nextInputElementCursor)
@@ -204,7 +217,7 @@ object ActorGraphInterpreter {
       override def toString: String = BatchingActorInputBoundary.this.toString
     })
 
-    override def toString: String = s"BatchingActorInputBoundary(id=$id, fill=$inputBufferElements/$size, completed=$upstreamCompleted, canceled=$downstreamCanceled)"
+    override def toString: String = s"BatchingActorInputBoundary(id=$id, fill=$inputBufferElements/$size, completed=$upstreamCompleted, canceled=$downstreamCanceled, hash=$contextRef)"
   }
 
   private[stream] class ActorOutputBoundary(actor: ActorRef, shell: GraphInterpreterShell, id: Int) extends DownstreamBoundaryStageLogic[Any] {
@@ -228,10 +241,14 @@ object ActorGraphInterpreter {
     }
 
     private def complete(): Unit = {
+      println(s"Downstream boundary (${System.identityHashCode(this)}) got complete with state upstreamCompleted: $upstreamCompleted downstreamCompleted: $downstreamCompleted subscriber: $subscriber exposedPublisher: $exposedPublisher")
       // No need to complete if had already been cancelled, or we closed earlier
       if (!(upstreamCompleted || downstreamCompleted)) {
         upstreamCompleted = true
-        if (exposedPublisher ne null) exposedPublisher.shutdown(None)
+        if (exposedPublisher ne null) {
+          println(s"Have exposedPublisher, now shutting down subscriber")
+          exposedPublisher.shutdown(None)
+        }
         if (subscriber ne null) tryOnComplete(subscriber)
       }
     }
@@ -260,7 +277,9 @@ object ActorGraphInterpreter {
       override def toString: String = ActorOutputBoundary.this.toString
     })
 
-    def subscribePending(): Unit =
+    def subscribePending(): Unit = {
+      println(s"Downstream boundary (${System.identityHashCode(this)}) got subscribe pending with state upstreamCompleted: $upstreamCompleted downstreamCompleted: $downstreamCompleted subscriber: $subscriber exposedPublisher: $exposedPublisher")
+
       exposedPublisher.takePendingSubscribers() foreach { sub ⇒
         if (subscriber eq null) {
           subscriber = sub
@@ -269,6 +288,7 @@ object ActorGraphInterpreter {
         } else
           rejectAdditionalSubscriber(subscriber, s"${Logging.simpleName(this)}")
       }
+    }
 
     def exposedPublisher(publisher: ActorPublisher[Any]): Unit = {
       exposedPublisher = publisher
@@ -317,7 +337,7 @@ final class GraphInterpreterShell(
 
   import ActorGraphInterpreter._
 
-  private var self: ActorRef = _
+  private[stream] var self: ActorRef = _
   lazy val log = Logging(mat.system.eventStream, self)
 
   private var enqueueToShortCircuit: (Any) ⇒ Unit = _
@@ -441,6 +461,7 @@ final class GraphInterpreterShell(
         outputs(id).cancel()
         runBatch(eventLimit)
       case SubscribePending(_, id: Int) ⇒
+        println("Got SubscribePending")
         outputs(id).subscribePending()
         eventLimit
       case ExposedPublisher(_, id, publisher) ⇒
