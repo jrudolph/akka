@@ -480,14 +480,25 @@ import scala.util.control.NonFatal
 
   private var enqueueToShortCircuit: (Any) ⇒ Unit = _
 
-  lazy val interpreter: GraphInterpreter = new GraphInterpreter(mat, log, logics, connections,
-    (logic, event, handler) ⇒ {
-      val asyncInput = AsyncInput(this, logic, event, handler)
-      val currentInterpreter = GraphInterpreter.currentInterpreterOrNull
-      if (currentInterpreter == null || (currentInterpreter.context ne self))
-        self ! asyncInput
-      else enqueueToShortCircuit(asyncInput)
-    }, settings.fuzzingMode, self)
+  lazy val interpreter: GraphInterpreter =
+    if (connections.size == 31)
+      new GraphInterpreter31Impl(mat, log, logics, connections,
+        (logic, event, handler) ⇒ {
+          val asyncInput = AsyncInput(this, logic, event, handler)
+          val currentInterpreter = GraphInterpreter.currentInterpreterOrNull
+          if (currentInterpreter == null || (currentInterpreter.context ne self))
+            self ! asyncInput
+          else enqueueToShortCircuit(asyncInput)
+        }, settings.fuzzingMode, self)
+    else
+      new GraphInterpreterImpl(mat, log, logics, connections,
+        (logic, event, handler) ⇒ {
+          val asyncInput = AsyncInput(this, logic, event, handler)
+          val currentInterpreter = GraphInterpreter.currentInterpreterOrNull
+          if (currentInterpreter == null || (currentInterpreter.context ne self))
+            self ! asyncInput
+          else enqueueToShortCircuit(asyncInput)
+        }, settings.fuzzingMode, self)
 
   // TODO: really needed?
   private var subscribesPending = 0
