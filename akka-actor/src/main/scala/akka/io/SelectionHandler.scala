@@ -106,13 +106,13 @@ private[io] object SelectionHandler {
 
   private class ChannelRegistryImpl(executionContext: ExecutionContext, log: LoggingAdapter) extends ChannelRegistry {
     private[this] val selector = SelectorProvider.provider.openSelector
-    private[this] val wakeUp = new AtomicBoolean(false)
+    //private[this] val wakeUp = new AtomicBoolean(false)
 
     final val OP_READ_AND_WRITE = OP_READ | OP_WRITE // compile-time constant
 
     private[this] val select = new Task {
       def tryRun(): Unit = {
-        if (selector.select() > 0) { // This assumes select return value == selectedKeys.size
+        if (selector.select(1) > 0) { // This assumes select return value == selectedKeys.size
           val keys = selector.selectedKeys
           val iterator = keys.iterator()
           while (iterator.hasNext) {
@@ -140,7 +140,7 @@ private[io] object SelectionHandler {
           }
           keys.clear() // we need to remove the selected keys from the set, otherwise they remain selected
         }
-        wakeUp.set(false)
+        //wakeUp.set(false)
       }
 
       override def run(): Unit =
@@ -208,8 +208,8 @@ private[io] object SelectionHandler {
 
     private def execute(task: Task): Unit = {
       executionContext.execute(task)
-      if (wakeUp.compareAndSet(false, true)) // if possible avoid syscall and trade off with LOCK CMPXCHG
-        selector.wakeup()
+      //if (wakeUp.compareAndSet(false, true)) // if possible avoid syscall and trade off with LOCK CMPXCHG
+      //selector.wakeup()
     }
 
     // FIXME: Add possibility to signal failure of task to someone
