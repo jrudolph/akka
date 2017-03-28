@@ -481,7 +481,7 @@ import scala.util.control.NonFatal
   private var enqueueToShortCircuit: (Any) ⇒ Unit = _
 
   lazy val interpreter: GraphInterpreter =
-    if (connections.size == 31)
+    if (connections.size == 29)
       new GraphInterpreter31Impl(mat, log, logics, connections,
         (logic, event, handler) ⇒ {
           val asyncInput = AsyncInput(this, logic, event, handler)
