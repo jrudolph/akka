@@ -11,6 +11,7 @@ import java.util.concurrent.ThreadLocalRandom
 
 import akka.annotation.InternalApi
 
+import scala.annotation.switch
 import scala.util.control.NonFatal
 
 /**
@@ -86,7 +87,7 @@ import scala.util.control.NonFatal
       else s"Connection($id, $portState, $slot, $inHandler, $outHandler)"
   }
 
-  private val _currentInterpreter = new ThreadLocal[Array[AnyRef]] {
+  private[fusing] val _currentInterpreter = new ThreadLocal[Array[AnyRef]] {
     /*
      * Using an Object-array avoids holding on to the GraphInterpreter class
      * when this accidentally leaks onto threads that are not stopped when this
@@ -186,14 +187,14 @@ import scala.util.control.NonFatal
  * be modeled, or even dissolved (if preempted and a "stealing" external event is injected; for example the non-cycle
  * edge of a balance is pulled, dissolving the original cycle).
  */
-@InternalApi private[akka] final class GraphInterpreter(
-  val materializer: Materializer,
-  val log:          LoggingAdapter,
-  val logics:       Array[GraphStageLogic], // Array of stage logics
-  val connections:  Array[GraphInterpreter.Connection],
-  val onAsyncInput: (GraphStageLogic, Any, (Any) ⇒ Unit) ⇒ Unit,
-  val fuzzingMode:  Boolean,
-  val context:      ActorRef) {
+@InternalApi private[akka] abstract class GraphInterpreter(
+  final val materializer: Materializer,
+  final val log:          LoggingAdapter,
+  final val logics:       Array[GraphStageLogic], // Array of stage logics
+  final val connections:  Array[GraphInterpreter.Connection],
+  final val onAsyncInput: (GraphStageLogic, Any, (Any) ⇒ Unit) ⇒ Unit,
+  final val fuzzingMode:  Boolean,
+  final val context:      ActorRef) {
 
   import GraphInterpreter._
 
@@ -209,28 +210,28 @@ import scala.util.control.NonFatal
 
   // The number of currently running stages. Once this counter reaches zero, the interpreter is considered to be
   // completed
-  private[this] var runningStages = logics.length
+  protected var runningStages = logics.length
 
   // Counts how many active connections a stage has. Once it reaches zero, the stage is automatically stopped.
-  private[this] val shutdownCounter = Array.tabulate(logics.length) { i ⇒
+  protected val shutdownCounter = Array.tabulate(logics.length) { i ⇒
     logics(i).handlers.length
   }
 
-  private[this] var _subFusingMaterializer: Materializer = _
+  protected var _subFusingMaterializer: Materializer = _
   def subFusingMaterializer: Materializer = _subFusingMaterializer
 
   // An event queue implemented as a circular buffer
   // FIXME: This calculates the maximum size ever needed, but most assemblies can run on a smaller queue
-  private[this] val eventQueue = new Array[Connection](1 << (32 - Integer.numberOfLeadingZeros(connections.length - 1)))
-  private[this] val mask = eventQueue.length - 1
-  private[this] var queueHead: Int = 0
-  private[this] var queueTail: Int = 0
+  protected val eventQueue = new Array[Connection](1 << (32 - Integer.numberOfLeadingZeros(connections.length - 1)))
+  protected val mask = eventQueue.length - 1
+  protected var queueHead: Int = 0
+  protected var queueTail: Int = 0
 
-  private[this] var chaseCounter = 0 // the first events in preStart blocks should be not chased
-  private[this] var chasedPush: Connection = NoEvent
-  private[this] var chasedPull: Connection = NoEvent
+  protected var chaseCounter = 0 // the first events in preStart blocks should be not chased
+  protected var chasedPush: Connection = NoEvent
+  protected var chasedPull: Connection = NoEvent
 
-  private def queueStatus: String = {
+  protected def queueStatus: String = {
     val contents = (queueHead until queueTail).map(idx ⇒ {
       val conn = eventQueue(idx & mask)
       conn
@@ -314,24 +315,249 @@ import scala.util.control.NonFatal
   }
 
   // Debug name for a connections input part
-  private def inOwnerName(connection: Connection): String = connection.inOwner.toString
+  protected def inOwnerName(connection: Connection): String = connection.inOwner.toString
 
   // Debug name for a connections output part
-  private def outOwnerName(connection: Connection): String = connection.outOwner.toString
+  protected def outOwnerName(connection: Connection): String = connection.outOwner.toString
 
   // Debug name for a connections input part
-  private def inLogicName(connection: Connection): String = logics(connection.inOwner.stageId).toString
+  protected def inLogicName(connection: Connection): String = logics(connection.inOwner.stageId).toString
 
   // Debug name for a connections output part
-  private def outLogicName(connection: Connection): String = logics(connection.outOwner.stageId).toString
+  protected def outLogicName(connection: Connection): String = logics(connection.outOwner.stageId).toString
 
-  private def shutdownCounters: String =
+  protected def shutdownCounters: String =
     shutdownCounter.map(x ⇒ if (x >= KeepGoingFlag) s"${x & KeepGoingMask}(KeepGoing)" else x.toString).mkString(",")
+
+  protected def reportStageError(e: Throwable): Unit = {
+    if (activeStage == null) throw e
+    else {
+      log.error(e, "Error in stage [{}]: {}", activeStage.originalStage.getOrElse(activeStage), e.getMessage)
+      activeStage.failStage(e)
+
+      // Abort chasing
+      chaseCounter = 0
+      if (chasedPush ne NoEvent) {
+        enqueue(chasedPush)
+        chasedPush = NoEvent
+      }
+      if (chasedPull ne NoEvent) {
+        enqueue(chasedPull)
+        chasedPull = NoEvent
+      }
+    }
+  }
 
   /**
    * Executes pending events until the given limit is met. If there were remaining events, isSuspended will return
    * true.
    */
+  def execute(eventLimit: Int): Int
+  protected def processEvent(connection: Connection): Unit
+
+  def runAsyncInput(logic: GraphStageLogic, evt: Any, handler: (Any) ⇒ Unit): Unit =
+    if (!isStageCompleted(logic)) {
+      if (GraphInterpreter.Debug) println(s"$Name ASYNC $evt ($handler) [$logic]")
+      val currentInterpreterHolder = _currentInterpreter.get()
+      val previousInterpreter = currentInterpreterHolder(0)
+      currentInterpreterHolder(0) = this
+      try {
+        activeStage = logic
+        try handler(evt)
+        catch {
+          case NonFatal(ex) ⇒ logic.failStage(ex)
+        }
+        afterStageHasRun(logic)
+      } finally currentInterpreterHolder(0) = previousInterpreter
+    }
+
+  protected def processPush(connection: Connection): Unit = {
+    if (Debug) println(s"$Name PUSH ${outOwnerName(connection)} -> ${inOwnerName(connection)}, ${connection.slot} (${connection.inHandler}) [${inLogicName(connection)}]")
+    activeStage = connection.inOwner
+    connection.portState ^= PushEndFlip
+    connection.inHandler.onPush()
+  }
+
+  protected def processPull(connection: Connection): Unit = {
+    if (Debug) println(s"$Name PULL ${inOwnerName(connection)} -> ${outOwnerName(connection)} (${connection.outHandler}) [${outLogicName(connection)}]")
+    activeStage = connection.outOwner
+    connection.portState ^= PullEndFlip
+    connection.outHandler.onPull()
+  }
+
+  protected def dequeue(): Connection = {
+    val idx = queueHead & mask
+    if (fuzzingMode) {
+      val swapWith = (ThreadLocalRandom.current.nextInt(queueTail - queueHead) + queueHead) & mask
+      val ev = eventQueue(swapWith)
+      eventQueue(swapWith) = eventQueue(idx)
+      eventQueue(idx) = ev
+    }
+    val elem = eventQueue(idx)
+    eventQueue(idx) = NoEvent
+    queueHead += 1
+    elem
+  }
+
+  def enqueue(connection: Connection): Unit = {
+    if (Debug) if (queueTail - queueHead > mask) new Exception(s"$Name internal queue full ($queueStatus) + $connection").printStackTrace()
+    eventQueue(queueTail & mask) = connection
+    queueTail += 1
+  }
+
+  def afterStageHasRun(logic: GraphStageLogic): Unit =
+    if (isStageCompleted(logic)) {
+      runningStages -= 1
+      finalizeStage(logic)
+    }
+
+  // Returns true if the given stage is already completed
+  def isStageCompleted(stage: GraphStageLogic): Boolean = stage != null && shutdownCounter(stage.stageId) == 0
+
+  // Register that a connection in which the given stage participated has been completed and therefore the stage
+  // itself might stop, too.
+  protected def completeConnection(stageId: Int): Unit = {
+    val activeConnections = shutdownCounter(stageId)
+    if (activeConnections > 0) shutdownCounter(stageId) = activeConnections - 1
+  }
+
+  private[stream] def setKeepGoing(logic: GraphStageLogic, enabled: Boolean): Unit =
+    if (enabled) shutdownCounter(logic.stageId) |= KeepGoingFlag
+    else shutdownCounter(logic.stageId) &= KeepGoingMask
+
+  private def finalizeStage(logic: GraphStageLogic): Unit = {
+    try {
+      logic.postStop()
+      logic.afterPostStop()
+    } catch {
+      case NonFatal(e) ⇒
+        log.error(e, s"Error during postStop in [{}]: {}", logic.originalStage.getOrElse(logic), e.getMessage)
+    }
+  }
+
+  protected[stream] def chasePush(connection: Connection): Unit = {
+    if (chaseCounter > 0 && chasedPush == NoEvent) {
+      chaseCounter -= 1
+      chasedPush = connection
+    } else enqueue(connection)
+  }
+
+  protected[stream] def chasePull(connection: Connection): Unit = {
+    if (chaseCounter > 0 && chasedPull == NoEvent) {
+      chaseCounter -= 1
+      chasedPull = connection
+    } else enqueue(connection)
+  }
+
+  protected[stream] def complete(connection: Connection): Unit = {
+    val currentState = connection.portState
+    if (Debug) println(s"$Name   complete($connection) [$currentState]")
+    connection.portState = currentState | OutClosed
+
+    // Push-Close needs special treatment, cannot be chased, convert back to ordinary event
+    if (chasedPush == connection) {
+      chasedPush = NoEvent
+      enqueue(connection)
+    } else if ((currentState & (InClosed | Pushing | Pulling | OutClosed)) == 0) enqueue(connection)
+
+    if ((currentState & OutClosed) == 0) completeConnection(connection.outOwner.stageId)
+  }
+
+  protected[stream] def fail(connection: Connection, ex: Throwable): Unit = {
+    val currentState = connection.portState
+    if (Debug) println(s"$Name   fail($connection, $ex) [$currentState]")
+    connection.portState = currentState | OutClosed
+    if ((currentState & (InClosed | OutClosed)) == 0) {
+      connection.portState = currentState | (OutClosed | InFailed)
+      connection.slot = Failed(ex, connection.slot)
+      if ((currentState & (Pulling | Pushing)) == 0) enqueue(connection)
+      else if (chasedPush eq connection) {
+        // Abort chasing so Failure is not lost (chasing does NOT decode the event but assumes it to be a PUSH
+        // but we just changed the event!)
+        chasedPush = NoEvent
+        enqueue(connection)
+      }
+    }
+    if ((currentState & OutClosed) == 0) completeConnection(connection.outOwner.stageId)
+  }
+
+  protected[stream] def cancel(connection: Connection): Unit = {
+    val currentState = connection.portState
+    if (Debug) println(s"$Name   cancel($connection) [$currentState]")
+    connection.portState = currentState | InClosed
+    if ((currentState & OutClosed) == 0) {
+      connection.slot = Empty
+      if ((currentState & (Pulling | Pushing | InClosed)) == 0) enqueue(connection)
+      else if (chasedPull eq connection) {
+        // Abort chasing so Cancel is not lost (chasing does NOT decode the event but assumes it to be a PULL
+        // but we just changed the event!)
+        chasedPull = NoEvent
+        enqueue(connection)
+      }
+    }
+    if ((currentState & InClosed) == 0) completeConnection(connection.inOwner.stageId)
+  }
+
+  /**
+   * Debug utility to dump the "waits-on" relationships in DOT format to the console for analysis of deadlocks.
+   * Use dot/graphviz to render graph.
+   *
+   * Only invoke this after the interpreter completely settled, otherwise the results might be off. This is a very
+   * simplistic tool, make sure you are understanding what you are doing and then it will serve you well.
+   */
+  def dumpWaits(): Unit = println(toString)
+
+  override def toString: String = {
+    try {
+      val builder = new StringBuilder("\ndot format graph for deadlock analysis:\n")
+      builder.append("================================================================\n")
+      builder.append("digraph waits {\n")
+
+      for (i ← logics.indices) {
+        val logic = logics(i)
+        val label = logic.originalStage.getOrElse(logic).toString
+        builder.append(s"""  N$i [label="$label"];""").append('\n')
+      }
+
+      val logicIndexes = logics.zipWithIndex.map { case (stage, idx) ⇒ stage → idx }.toMap
+      for (connection ← connections) {
+        val inName = "N" + logicIndexes(connection.inOwner)
+        val outName = "N" + logicIndexes(connection.outOwner)
+
+        builder.append(s"  $inName -> $outName ")
+        connection.portState match {
+          case InReady ⇒
+            builder.append("[label=shouldPull; color=blue];")
+          case OutReady ⇒
+            builder.append(s"[label=shouldPush; color=red];")
+          case x if (x | InClosed | OutClosed) == (InClosed | OutClosed) ⇒
+            builder.append("[style=dotted; label=closed dir=both];")
+          case _ ⇒
+        }
+        builder.append("\n")
+      }
+
+      builder.append("}\n================================================================\n")
+      builder.append(s"// $queueStatus (running=$runningStages, shutdown=${shutdownCounter.mkString(",")})")
+      builder.toString()
+    } catch {
+      case _: NoSuchElementException ⇒ "Not all logics has a stage listed, cannot create graph"
+    }
+  }
+}
+
+private[akka] final class GraphInterpreterImpl(
+  materializer: Materializer,
+  log:          LoggingAdapter,
+  logics:       Array[GraphStageLogic], // Array of stage logics
+  connections:  Array[GraphInterpreter.Connection],
+  onAsyncInput: (GraphStageLogic, Any, (Any) ⇒ Unit) ⇒ Unit,
+  fuzzingMode:  Boolean,
+  context:      ActorRef) extends GraphInterpreter(materializer, log, logics, connections, onAsyncInput, fuzzingMode, context) {
+  import GraphInterpreter._
+
+  println(s"GraphInterpreter created with ${connections.size} conns")
+
   def execute(eventLimit: Int): Int = {
     if (Debug) println(s"$Name ---------------- EXECUTE $queueStatus (running=$runningStages, shutdown=$shutdownCounters)")
     val currentInterpreterHolder = _currentInterpreter.get()
@@ -343,25 +569,6 @@ import scala.util.control.NonFatal
         val connection = dequeue()
         eventsRemaining -= 1
         chaseCounter = math.min(ChaseLimit, eventsRemaining)
-
-        def reportStageError(e: Throwable): Unit = {
-          if (activeStage == null) throw e
-          else {
-            log.error(e, "Error in stage [{}]: {}", activeStage.originalStage.getOrElse(activeStage), e.getMessage)
-            activeStage.failStage(e)
-
-            // Abort chasing
-            chaseCounter = 0
-            if (chasedPush ne NoEvent) {
-              enqueue(chasedPush)
-              chasedPush = NoEvent
-            }
-            if (chasedPull ne NoEvent) {
-              enqueue(chasedPull)
-              chasedPull = NoEvent
-            }
-          }
-        }
 
         /*
          * This is the "normal" event processing code which dequeues directly from the internal event queue. Since
@@ -435,24 +642,8 @@ import scala.util.control.NonFatal
     eventsRemaining
   }
 
-  def runAsyncInput(logic: GraphStageLogic, evt: Any, handler: (Any) ⇒ Unit): Unit =
-    if (!isStageCompleted(logic)) {
-      if (GraphInterpreter.Debug) println(s"$Name ASYNC $evt ($handler) [$logic]")
-      val currentInterpreterHolder = _currentInterpreter.get()
-      val previousInterpreter = currentInterpreterHolder(0)
-      currentInterpreterHolder(0) = this
-      try {
-        activeStage = logic
-        try handler(evt)
-        catch {
-          case NonFatal(ex) ⇒ logic.failStage(ex)
-        }
-        afterStageHasRun(logic)
-      } finally currentInterpreterHolder(0) = previousInterpreter
-    }
-
   // Decodes and processes a single event for the given connection
-  private def processEvent(connection: Connection): Unit = {
+  protected final def processEvent(connection: Connection): Unit = {
 
     // this must be the state after returning without delivering any signals, to avoid double-finalization of some unlucky stage
     // (this can happen if a stage completes voluntarily while connection close events are still queued)
@@ -495,177 +686,231 @@ import scala.util.control.NonFatal
     }
   }
 
-  private def processPush(connection: Connection): Unit = {
+  protected final override def processPush(connection: Connection): Unit = {
     if (Debug) println(s"$Name PUSH ${outOwnerName(connection)} -> ${inOwnerName(connection)}, ${connection.slot} (${connection.inHandler}) [${inLogicName(connection)}]")
     activeStage = connection.inOwner
     connection.portState ^= PushEndFlip
     connection.inHandler.onPush()
   }
+}
 
-  private def processPull(connection: Connection): Unit = {
+private[akka] final class GraphInterpreter31Impl(
+  materializer: Materializer,
+  log:          LoggingAdapter,
+  logics:       Array[GraphStageLogic], // Array of stage logics
+  connections:  Array[GraphInterpreter.Connection],
+  onAsyncInput: (GraphStageLogic, Any, (Any) ⇒ Unit) ⇒ Unit,
+  fuzzingMode:  Boolean,
+  context:      ActorRef) extends GraphInterpreter(materializer, log, logics, connections, onAsyncInput, fuzzingMode, context) {
+  import GraphInterpreter._
+
+  println(s"Created special cased HTTP graph interpreter")
+
+  final override def execute(eventLimit: Int): Int = {
+    if (Debug) println(s"$Name ---------------- EXECUTE $queueStatus (running=$runningStages, shutdown=$shutdownCounters)")
+    val currentInterpreterHolder = _currentInterpreter.get()
+    val previousInterpreter = currentInterpreterHolder(0)
+    currentInterpreterHolder(0) = this
+    var eventsRemaining = eventLimit
+    try {
+      while (eventsRemaining > 0 && queueTail != queueHead) {
+        val connection = dequeue()
+        eventsRemaining -= 1
+        chaseCounter = math.min(ChaseLimit, eventsRemaining)
+
+        /*
+         * This is the "normal" event processing code which dequeues directly from the internal event queue. Since
+         * most execution paths tend to produce either a Push that will be propagated along a longer chain we take
+         * extra steps below to make this more efficient.
+         */
+        try processEvent(connection)
+        catch {
+          case NonFatal(e) ⇒ reportStageError(e)
+        }
+        afterStageHasRun(activeStage)
+
+        /*
+         * "Event chasing" optimization follows from here. This optimization works under the assumption that a Push or
+         * Pull is very likely immediately followed by another Push/Pull. The difference from the "normal" event
+         * dispatch is that chased events are never touching the event queue, they use a "streamlined" execution path
+         * instead. Looking at the scenario of a Push, the following events will happen.
+         *  - "normal" dispatch executes an onPush event
+         *  - stage eventually calls push()
+         *  - code inside the push() method checks the validity of the call, and also if it can be safely ignored
+         *    (because the target stage already completed we just have not been notified yet)
+         *  - if the upper limit of ChaseLimit has not been reached, then the Connection is put into the chasedPush
+         *    variable
+         *  - the loop below immediately captures this push and dispatches it
+         *
+         * What is saved by this optimization is three steps:
+         *  - no need to enqueue the Connection in the queue (array), it ends up in a simple variable, reducing
+         *    pressure on array load-store
+         *  - no need to dequeue the Connection from the queue, similar to above
+         *  - no need to decode the event, we know it is a Push already
+         *  - no need to check for validity of the event because we already checked at the push() call, and there
+         *    can be no concurrent events interleaved unlike with the normal dispatch (think about a cancel() that is
+         *    called in the target stage just before the onPush() arrives). This avoids unnecessary branching.
+         */
+
+        // Chasing PUSH events
+        while (chasedPush != NoEvent) {
+          val connection = chasedPush
+          chasedPush = NoEvent
+          try processPush(connection)
+          catch {
+            case NonFatal(e) ⇒ reportStageError(e)
+          }
+          afterStageHasRun(activeStage)
+        }
+
+        // Chasing PULL events
+        while (chasedPull != NoEvent) {
+          val connection = chasedPull
+          chasedPull = NoEvent
+          try processPull(connection)
+          catch {
+            case NonFatal(e) ⇒ reportStageError(e)
+          }
+          afterStageHasRun(activeStage)
+        }
+
+        if (chasedPush != NoEvent) {
+          enqueue(chasedPush)
+          chasedPush = NoEvent
+        }
+
+      }
+      // Event *must* be enqueued while not in the execute loop (events enqueued from external, possibly async events)
+      chaseCounter = 0
+    } finally {
+      currentInterpreterHolder(0) = previousInterpreter
+    }
+    if (Debug) println(s"$Name ---------------- $queueStatus (running=$runningStages, shutdown=$shutdownCounters)")
+    // TODO: deadlock detection
+    eventsRemaining
+  }
+
+  // Decodes and processes a single event for the given connection
+  protected final def processEvent(connection: Connection): Unit = {
+
+    // this must be the state after returning without delivering any signals, to avoid double-finalization of some unlucky stage
+    // (this can happen if a stage completes voluntarily while connection close events are still queued)
+    activeStage = null
+    val code = connection.portState
+
+    // Manual fast decoding, fast paths are PUSH and PULL
+    //   PUSH
+    if ((code & (Pushing | InClosed | OutClosed)) == Pushing) {
+      processPush(connection)
+
+      // PULL
+    } else if ((code & (Pulling | OutClosed | InClosed)) == Pulling) {
+      processPull(connection)
+
+      // CANCEL
+    } else if ((code & (OutClosed | InClosed)) == InClosed) {
+      activeStage = connection.outOwner
+      if (Debug) println(s"$Name CANCEL ${inOwnerName(connection)} -> ${outOwnerName(connection)} (${connection.outHandler}) [${outLogicName(connection)}]")
+      connection.portState |= OutClosed
+      completeConnection(connection.outOwner.stageId)
+      connection.outHandler.onDownstreamFinish()
+    } else if ((code & (OutClosed | InClosed)) == OutClosed) {
+      // COMPLETIONS
+
+      if ((code & Pushing) == 0) {
+        // Normal completion (no push pending)
+        if (Debug) println(s"$Name COMPLETE ${outOwnerName(connection)} -> ${inOwnerName(connection)} (${connection.inHandler}) [${inLogicName(connection)}]")
+        connection.portState |= InClosed
+        activeStage = connection.inOwner
+        completeConnection(connection.inOwner.stageId)
+        if ((connection.portState & InFailed) == 0) connection.inHandler.onUpstreamFinish()
+        else connection.inHandler.onUpstreamFailure(connection.slot.asInstanceOf[Failed].ex)
+      } else {
+        // Push is pending, first process push, then re-enqueue closing event
+        processPush(connection)
+        enqueue(connection)
+      }
+
+    }
+  }
+
+  protected final override def processPush(connection: Connection): Unit = {
+    if (Debug) println(s"$Name PUSH ${outOwnerName(connection)} -> ${inOwnerName(connection)}, ${connection.slot} (${connection.inHandler}) [${inLogicName(connection)}]")
+    activeStage = connection.inOwner
+    connection.portState ^= PushEndFlip
+
+    (connection.id: @switch) match {
+      case 0  ⇒ connection.inHandler.onPush()
+      case 1  ⇒ connection.inHandler.onPush()
+      case 2  ⇒ connection.inHandler.onPush()
+      case 3  ⇒ connection.inHandler.onPush()
+      case 4  ⇒ connection.inHandler.onPush()
+      case 5  ⇒ connection.inHandler.onPush()
+      case 6  ⇒ connection.inHandler.onPush()
+      case 7  ⇒ connection.inHandler.onPush()
+      case 8  ⇒ connection.inHandler.onPush()
+      case 9  ⇒ connection.inHandler.onPush()
+      case 10 ⇒ connection.inHandler.onPush()
+      case 11 ⇒ connection.inHandler.onPush()
+      case 12 ⇒ connection.inHandler.onPush()
+      case 13 ⇒ connection.inHandler.onPush()
+      case 14 ⇒ connection.inHandler.onPush()
+      case 15 ⇒ connection.inHandler.onPush()
+      case 16 ⇒ connection.inHandler.onPush()
+      case 17 ⇒ connection.inHandler.onPush()
+      case 18 ⇒ connection.inHandler.onPush()
+      case 19 ⇒ connection.inHandler.onPush()
+      case 20 ⇒ connection.inHandler.onPush()
+      case 21 ⇒ connection.inHandler.onPush()
+      case 22 ⇒ connection.inHandler.onPush()
+      case 23 ⇒ connection.inHandler.onPush()
+      case 24 ⇒ connection.inHandler.onPush()
+      case 25 ⇒ connection.inHandler.onPush()
+      case 26 ⇒ connection.inHandler.onPush()
+      case 27 ⇒ connection.inHandler.onPush()
+      case 28 ⇒ connection.inHandler.onPush()
+      case 29 ⇒ connection.inHandler.onPush()
+      case 30 ⇒ connection.inHandler.onPush()
+    }
+  }
+
+  protected final override def processPull(connection: Connection): Unit = {
     if (Debug) println(s"$Name PULL ${inOwnerName(connection)} -> ${outOwnerName(connection)} (${connection.outHandler}) [${outLogicName(connection)}]")
     activeStage = connection.outOwner
     connection.portState ^= PullEndFlip
-    connection.outHandler.onPull()
-  }
 
-  private def dequeue(): Connection = {
-    val idx = queueHead & mask
-    if (fuzzingMode) {
-      val swapWith = (ThreadLocalRandom.current.nextInt(queueTail - queueHead) + queueHead) & mask
-      val ev = eventQueue(swapWith)
-      eventQueue(swapWith) = eventQueue(idx)
-      eventQueue(idx) = ev
-    }
-    val elem = eventQueue(idx)
-    eventQueue(idx) = NoEvent
-    queueHead += 1
-    elem
-  }
-
-  def enqueue(connection: Connection): Unit = {
-    if (Debug) if (queueTail - queueHead > mask) new Exception(s"$Name internal queue full ($queueStatus) + $connection").printStackTrace()
-    eventQueue(queueTail & mask) = connection
-    queueTail += 1
-  }
-
-  def afterStageHasRun(logic: GraphStageLogic): Unit =
-    if (isStageCompleted(logic)) {
-      runningStages -= 1
-      finalizeStage(logic)
-    }
-
-  // Returns true if the given stage is already completed
-  def isStageCompleted(stage: GraphStageLogic): Boolean = stage != null && shutdownCounter(stage.stageId) == 0
-
-  // Register that a connection in which the given stage participated has been completed and therefore the stage
-  // itself might stop, too.
-  private def completeConnection(stageId: Int): Unit = {
-    val activeConnections = shutdownCounter(stageId)
-    if (activeConnections > 0) shutdownCounter(stageId) = activeConnections - 1
-  }
-
-  private[stream] def setKeepGoing(logic: GraphStageLogic, enabled: Boolean): Unit =
-    if (enabled) shutdownCounter(logic.stageId) |= KeepGoingFlag
-    else shutdownCounter(logic.stageId) &= KeepGoingMask
-
-  private def finalizeStage(logic: GraphStageLogic): Unit = {
-    try {
-      logic.postStop()
-      logic.afterPostStop()
-    } catch {
-      case NonFatal(e) ⇒
-        log.error(e, s"Error during postStop in [{}]: {}", logic.originalStage.getOrElse(logic), e.getMessage)
-    }
-  }
-
-  private[stream] def chasePush(connection: Connection): Unit = {
-    if (chaseCounter > 0 && chasedPush == NoEvent) {
-      chaseCounter -= 1
-      chasedPush = connection
-    } else enqueue(connection)
-  }
-
-  private[stream] def chasePull(connection: Connection): Unit = {
-    if (chaseCounter > 0 && chasedPull == NoEvent) {
-      chaseCounter -= 1
-      chasedPull = connection
-    } else enqueue(connection)
-  }
-
-  private[stream] def complete(connection: Connection): Unit = {
-    val currentState = connection.portState
-    if (Debug) println(s"$Name   complete($connection) [$currentState]")
-    connection.portState = currentState | OutClosed
-
-    // Push-Close needs special treatment, cannot be chased, convert back to ordinary event
-    if (chasedPush == connection) {
-      chasedPush = NoEvent
-      enqueue(connection)
-    } else if ((currentState & (InClosed | Pushing | Pulling | OutClosed)) == 0) enqueue(connection)
-
-    if ((currentState & OutClosed) == 0) completeConnection(connection.outOwner.stageId)
-  }
-
-  private[stream] def fail(connection: Connection, ex: Throwable): Unit = {
-    val currentState = connection.portState
-    if (Debug) println(s"$Name   fail($connection, $ex) [$currentState]")
-    connection.portState = currentState | OutClosed
-    if ((currentState & (InClosed | OutClosed)) == 0) {
-      connection.portState = currentState | (OutClosed | InFailed)
-      connection.slot = Failed(ex, connection.slot)
-      if ((currentState & (Pulling | Pushing)) == 0) enqueue(connection)
-      else if (chasedPush eq connection) {
-        // Abort chasing so Failure is not lost (chasing does NOT decode the event but assumes it to be a PUSH
-        // but we just changed the event!)
-        chasedPush = NoEvent
-        enqueue(connection)
-      }
-    }
-    if ((currentState & OutClosed) == 0) completeConnection(connection.outOwner.stageId)
-  }
-
-  private[stream] def cancel(connection: Connection): Unit = {
-    val currentState = connection.portState
-    if (Debug) println(s"$Name   cancel($connection) [$currentState]")
-    connection.portState = currentState | InClosed
-    if ((currentState & OutClosed) == 0) {
-      connection.slot = Empty
-      if ((currentState & (Pulling | Pushing | InClosed)) == 0) enqueue(connection)
-      else if (chasedPull eq connection) {
-        // Abort chasing so Cancel is not lost (chasing does NOT decode the event but assumes it to be a PULL
-        // but we just changed the event!)
-        chasedPull = NoEvent
-        enqueue(connection)
-      }
-    }
-    if ((currentState & InClosed) == 0) completeConnection(connection.inOwner.stageId)
-  }
-
-  /**
-   * Debug utility to dump the "waits-on" relationships in DOT format to the console for analysis of deadlocks.
-   * Use dot/graphviz to render graph.
-   *
-   * Only invoke this after the interpreter completely settled, otherwise the results might be off. This is a very
-   * simplistic tool, make sure you are understanding what you are doing and then it will serve you well.
-   */
-  def dumpWaits(): Unit = println(toString)
-
-  override def toString: String = {
-    try {
-      val builder = new StringBuilder("\ndot format graph for deadlock analysis:\n")
-      builder.append("================================================================\n")
-      builder.append("digraph waits {\n")
-
-      for (i ← logics.indices) {
-        val logic = logics(i)
-        val label = logic.originalStage.getOrElse(logic).toString
-        builder.append(s"""  N$i [label="$label"];""").append('\n')
-      }
-
-      val logicIndexes = logics.zipWithIndex.map { case (stage, idx) ⇒ stage → idx }.toMap
-      for (connection ← connections) {
-        val inName = "N" + logicIndexes(connection.inOwner)
-        val outName = "N" + logicIndexes(connection.outOwner)
-
-        builder.append(s"  $inName -> $outName ")
-        connection.portState match {
-          case InReady ⇒
-            builder.append("[label=shouldPull; color=blue];")
-          case OutReady ⇒
-            builder.append(s"[label=shouldPush; color=red];")
-          case x if (x | InClosed | OutClosed) == (InClosed | OutClosed) ⇒
-            builder.append("[style=dotted; label=closed dir=both];")
-          case _ ⇒
-        }
-        builder.append("\n")
-      }
-
-      builder.append("}\n================================================================\n")
-      builder.append(s"// $queueStatus (running=$runningStages, shutdown=${shutdownCounter.mkString(",")})")
-      builder.toString()
-    } catch {
-      case _: NoSuchElementException ⇒ "Not all logics has a stage listed, cannot create graph"
+    (connection.id: @switch) match {
+      case 0  ⇒ connection.outHandler.onPull()
+      case 1  ⇒ connection.outHandler.onPull()
+      case 2  ⇒ connection.outHandler.onPull()
+      case 3  ⇒ connection.outHandler.onPull()
+      case 4  ⇒ connection.outHandler.onPull()
+      case 5  ⇒ connection.outHandler.onPull()
+      case 6  ⇒ connection.outHandler.onPull()
+      case 7  ⇒ connection.outHandler.onPull()
+      case 8  ⇒ connection.outHandler.onPull()
+      case 9  ⇒ connection.outHandler.onPull()
+      case 10 ⇒ connection.outHandler.onPull()
+      case 11 ⇒ connection.outHandler.onPull()
+      case 12 ⇒ connection.outHandler.onPull()
+      case 13 ⇒ connection.outHandler.onPull()
+      case 14 ⇒ connection.outHandler.onPull()
+      case 15 ⇒ connection.outHandler.onPull()
+      case 16 ⇒ connection.outHandler.onPull()
+      case 17 ⇒ connection.outHandler.onPull()
+      case 18 ⇒ connection.outHandler.onPull()
+      case 19 ⇒ connection.outHandler.onPull()
+      case 20 ⇒ connection.outHandler.onPull()
+      case 21 ⇒ connection.outHandler.onPull()
+      case 22 ⇒ connection.outHandler.onPull()
+      case 23 ⇒ connection.outHandler.onPull()
+      case 24 ⇒ connection.outHandler.onPull()
+      case 25 ⇒ connection.outHandler.onPull()
+      case 26 ⇒ connection.outHandler.onPull()
+      case 27 ⇒ connection.outHandler.onPull()
+      case 28 ⇒ connection.outHandler.onPull()
+      case 29 ⇒ connection.outHandler.onPull()
+      case 30 ⇒ connection.outHandler.onPull()
     }
   }
 }
