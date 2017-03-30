@@ -197,7 +197,7 @@ import scala.util.control.NonFatal
 
   import GraphInterpreter._
 
-  private val enableChasing = true
+  private val enableChasing = false
 
   protected val ChaseLimit =
     if (!enableChasing || fuzzingMode) 0 else 16
