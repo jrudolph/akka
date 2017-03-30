@@ -36,6 +36,10 @@ import scala.util.control.NonFatal
   final val OutClosed = 32
   final val InFailed = 64
 
+  final val PushingInClosedOutClosed = Pushing | InClosed | OutClosed
+  final val PullingInClosedOutClosed = Pulling | OutClosed | InClosed
+  final val OutClosedInClosed = OutClosed | InClosed
+
   final val PullStartFlip = 3 // 0011
   final val PullEndFlip = 10 // 1010
   final val PushStartFlip = 12 //1100
@@ -716,69 +720,12 @@ private[akka] final class GraphInterpreter31Impl(
       while (eventsRemaining > 0 && queueTail != queueHead) {
         val connection = dequeue()
         eventsRemaining -= 1
-        chaseCounter = math.min(ChaseLimit, eventsRemaining)
 
-        /*
-         * This is the "normal" event processing code which dequeues directly from the internal event queue. Since
-         * most execution paths tend to produce either a Push that will be propagated along a longer chain we take
-         * extra steps below to make this more efficient.
-         */
         try processEvent(connection)
         catch {
           case NonFatal(e) ⇒ reportStageError(e)
         }
         afterStageHasRun(activeStage)
-
-        /*
-         * "Event chasing" optimization follows from here. This optimization works under the assumption that a Push or
-         * Pull is very likely immediately followed by another Push/Pull. The difference from the "normal" event
-         * dispatch is that chased events are never touching the event queue, they use a "streamlined" execution path
-         * instead. Looking at the scenario of a Push, the following events will happen.
-         *  - "normal" dispatch executes an onPush event
-         *  - stage eventually calls push()
-         *  - code inside the push() method checks the validity of the call, and also if it can be safely ignored
-         *    (because the target stage already completed we just have not been notified yet)
-         *  - if the upper limit of ChaseLimit has not been reached, then the Connection is put into the chasedPush
-         *    variable
-         *  - the loop below immediately captures this push and dispatches it
-         *
-         * What is saved by this optimization is three steps:
-         *  - no need to enqueue the Connection in the queue (array), it ends up in a simple variable, reducing
-         *    pressure on array load-store
-         *  - no need to dequeue the Connection from the queue, similar to above
-         *  - no need to decode the event, we know it is a Push already
-         *  - no need to check for validity of the event because we already checked at the push() call, and there
-         *    can be no concurrent events interleaved unlike with the normal dispatch (think about a cancel() that is
-         *    called in the target stage just before the onPush() arrives). This avoids unnecessary branching.
-         */
-
-        // Chasing PUSH events
-        while (chasedPush != NoEvent) {
-          val connection = chasedPush
-          chasedPush = NoEvent
-          try processPush(connection)
-          catch {
-            case NonFatal(e) ⇒ reportStageError(e)
-          }
-          afterStageHasRun(activeStage)
-        }
-
-        // Chasing PULL events
-        while (chasedPull != NoEvent) {
-          val connection = chasedPull
-          chasedPull = NoEvent
-          try processPull(connection)
-          catch {
-            case NonFatal(e) ⇒ reportStageError(e)
-          }
-          afterStageHasRun(activeStage)
-        }
-
-        if (chasedPush != NoEvent) {
-          enqueue(chasedPush)
-          chasedPush = NoEvent
-        }
-
       }
       // Event *must* be enqueued while not in the execute loop (events enqueued from external, possibly async events)
       chaseCounter = 0
@@ -800,15 +747,15 @@ private[akka] final class GraphInterpreter31Impl(
 
     // Manual fast decoding, fast paths are PUSH and PULL
     //   PUSH
-    if ((code & (Pushing | InClosed | OutClosed)) == Pushing) {
+    if ((code & PushingInClosedOutClosed) == Pushing) {
       processPush(connection)
 
       // PULL
-    } else if ((code & (Pulling | OutClosed | InClosed)) == Pulling) {
+    } else if ((code & PullingInClosedOutClosed) == Pulling) {
       processPull(connection)
 
       // CANCEL
-    } else if ((code & (OutClosed | InClosed)) == InClosed) {
+    } else if ((code & OutClosedInClosed) == InClosed) {
       activeStage = connection.outOwner
       if (Debug) println(s"$Name CANCEL ${inOwnerName(connection)} -> ${outOwnerName(connection)} (${connection.outHandler}) [${outLogicName(connection)}]")
       connection.portState |= OutClosed
