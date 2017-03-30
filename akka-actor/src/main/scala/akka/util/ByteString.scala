@@ -12,7 +12,7 @@ import scala.annotation.{ tailrec, varargs }
 import scala.collection.IndexedSeqOptimized
 import scala.collection.mutable.{ Builder, WrappedArray }
 import scala.collection.immutable
-import scala.collection.immutable.{ IndexedSeq, VectorBuilder, VectorIterator }
+import scala.collection.immutable.{ IndexedSeq, Iterable, VectorBuilder, VectorIterator }
 import scala.collection.generic.CanBuildFrom
 import scala.reflect.ClassTag
 import java.nio.charset.{ Charset, StandardCharsets }
@@ -114,6 +114,24 @@ object ByteString {
       is.readFully(arr, 0, length)
       ByteString1C(arr)
     }
+  }
+
+  final class ByteString1CByteBuffer(byteBuffer: ByteBuffer) extends CompactByteString {
+    def length: Int = byteBuffer.limit()
+    def apply(idx: Int): Byte = byteBuffer.get(idx)
+
+    private[akka] def byteStringCompanion: Companion = convertToRegular.byteStringCompanion
+    private[akka] def writeToOutputStream(os: ObjectOutputStream): Unit = convertToRegular.writeToOutputStream(os)
+
+    def ++(that: ByteString): ByteString = convertToRegular ++ that
+
+    def asByteBuffer: ByteBuffer = byteBuffer
+    def asByteBuffers: Iterable[ByteBuffer] = byteBuffer :: Nil
+
+    def convertToRegular: ByteString = ByteString.fromByteBuffer(byteBuffer)
+
+    def decodeString(charset: String): String = convertToRegular.decodeString(charset)
+    def decodeString(charset: Charset): String = convertToRegular.decodeString(charset)
   }
 
   /**
