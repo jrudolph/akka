@@ -310,7 +310,7 @@ private[akka] class AffinityPool(
 @InternalApi
 @ApiMayChange
 private[akka] final class AffinityPoolConfigurator(config: Config, prerequisites: DispatcherPrerequisites)
-  extends ExecutorServiceConfigurator(config, prerequisites) {
+  extends ExecutorServiceConfigurator {
 
   private val poolSize = ThreadPoolConfig.scaledPoolSize(
     config.getInt("parallelism-min"),

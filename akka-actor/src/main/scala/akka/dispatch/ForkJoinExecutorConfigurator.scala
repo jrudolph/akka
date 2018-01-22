@@ -55,7 +55,7 @@ object ForkJoinExecutorConfigurator {
   }
 }
 
-class ForkJoinExecutorConfigurator(config: Config, prerequisites: DispatcherPrerequisites) extends ExecutorServiceConfigurator(config, prerequisites) {
+class ForkJoinExecutorConfigurator(config: Config) extends ExecutorServiceConfigurator {
   import ForkJoinExecutorConfigurator._
 
   def validate(t: ThreadFactory): ForkJoinPool.ForkJoinWorkerThreadFactory = t match {

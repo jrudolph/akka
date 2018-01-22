@@ -309,7 +309,7 @@ abstract class MessageDispatcher(val configurator: MessageDispatcherConfigurator
 /**
  * An ExecutorServiceConfigurator is a class that given some prerequisites and a configuration can create instances of ExecutorService
  */
-abstract class ExecutorServiceConfigurator(config: Config, prerequisites: DispatcherPrerequisites) extends ExecutorServiceFactoryProvider
+abstract class ExecutorServiceConfigurator extends ExecutorServiceFactoryProvider
 
 /**
  * Base class to be used for hooking in new dispatchers into Dispatchers.
@@ -327,8 +327,8 @@ abstract class MessageDispatcherConfigurator(_config: Config, val prerequisites:
 
   def configureExecutor(): ExecutorServiceConfigurator = {
     def configurator(executor: String): ExecutorServiceConfigurator = executor match {
-      case null | "" | "fork-join-executor" ⇒ new ForkJoinExecutorConfigurator(config.getConfig("fork-join-executor"), prerequisites)
-      case "thread-pool-executor"           ⇒ new ThreadPoolExecutorConfigurator(config.getConfig("thread-pool-executor"), prerequisites)
+      case null | "" | "fork-join-executor" ⇒ new ForkJoinExecutorConfigurator(config.getConfig("fork-join-executor"))
+      case "thread-pool-executor"           ⇒ new ThreadPoolExecutorConfigurator(config.getConfig("thread-pool-executor"))
       case "affinity-pool-executor"         ⇒ new AffinityPoolConfigurator(config.getConfig("affinity-pool-executor"), prerequisites)
 
       case fqcn ⇒
@@ -350,11 +350,11 @@ abstract class MessageDispatcherConfigurator(_config: Config, val prerequisites:
   }
 }
 
-class ThreadPoolExecutorConfigurator(config: Config, prerequisites: DispatcherPrerequisites) extends ExecutorServiceConfigurator(config, prerequisites) {
+class ThreadPoolExecutorConfigurator(config: Config) extends ExecutorServiceConfigurator {
 
-  val threadPoolConfig: ThreadPoolConfig = createThreadPoolConfigBuilder(config, prerequisites).config
+  val threadPoolConfig: ThreadPoolConfig = createThreadPoolConfigBuilder(config).config
 
-  protected def createThreadPoolConfigBuilder(config: Config, prerequisites: DispatcherPrerequisites): ThreadPoolConfigBuilder = {
+  protected def createThreadPoolConfigBuilder(config: Config): ThreadPoolConfigBuilder = {
     import akka.util.Helpers.ConfigOps
     val builder =
       ThreadPoolConfigBuilder(ThreadPoolConfig())
@@ -383,7 +383,7 @@ class ThreadPoolExecutorConfigurator(config: Config, prerequisites: DispatcherPr
     threadPoolConfig.createExecutorServiceFactory(id, threadFactory)
 }
 
-class DefaultExecutorServiceConfigurator(config: Config, prerequisites: DispatcherPrerequisites, fallback: ExecutorServiceConfigurator) extends ExecutorServiceConfigurator(config, prerequisites) {
+class DefaultExecutorServiceConfigurator(config: Config, prerequisites: DispatcherPrerequisites, fallback: ExecutorServiceConfigurator) extends ExecutorServiceConfigurator {
   val provider: ExecutorServiceFactoryProvider =
     prerequisites.defaultExecutionContext match {
       case Some(ec) ⇒
