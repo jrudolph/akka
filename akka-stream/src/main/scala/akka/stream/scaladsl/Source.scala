@@ -217,6 +217,8 @@ final class Source[+Out, +Mat](
 
       combineRest(2, rest.iterator)
     })
+
+  def withContext: SourceWithContext[Out, Out, Mat] = SourceWithContext(this)
 }
 
 object Source {
