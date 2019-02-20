@@ -15,7 +15,7 @@ import scala.concurrent.duration._
 
 @State(Scope.Benchmark)
 @BenchmarkMode(Array(Mode.Throughput))
-@Fork(1)
+@Fork(value = 1 /*, jvmArgs = Array("-XX:+PreserveFramePointer")*/ )
 @Threads(1)
 @Warmup(iterations = 10, time = 5, timeUnit = TimeUnit.SECONDS, batchSize = 1)
 @Measurement(iterations = 10, time = 15, timeUnit = TimeUnit.SECONDS, batchSize = 1)
@@ -28,7 +28,9 @@ class ForkJoinActorBenchmark {
   @Param(Array(coresStr)) // coresStr, cores2xStr, cores4xStr
   var threads = ""
 
-  @Param(Array("akka.dispatch.SingleConsumerOnlyUnboundedMailbox", "akka.actor.ManyToOneArrayMailbox", "akka.actor.JCToolsMailbox"))
+  var threadInt: Int = 0
+
+  @Param(Array("akka.dispatch.UnboundedMailbox", "akka.dispatch.SingleConsumerOnlyUnboundedMailbox", "akka.actor.ManyToOneArrayMailbox", "akka.actor.JCToolsMailbox"))
   var mailbox = ""
 
   implicit var system: ActorSystem = _
@@ -37,6 +39,7 @@ class ForkJoinActorBenchmark {
   def setup(): Unit = {
 
     requireRightNumberOfCores(cores)
+    threadInt = threads.toInt
 
     system = ActorSystem("ForkJoinActorBenchmark", ConfigFactory.parseString(
       s"""
@@ -80,7 +83,7 @@ class ForkJoinActorBenchmark {
 
   @Benchmark
   @OperationsPerInvocation(totalMessagesMoreThanCores)
-  def pingPongMoreActorsThanCores(): Unit = benchmarkPingPongActors(messages, moreThanCoresActors, "fjp-dispatcher", tpt, timeout)
+  def pingPongMoreActorsThanCores(): Unit = benchmarkPingPongActors(messages, threadInt * 2, "fjp-dispatcher", tpt, timeout)
 
   //  @Benchmark
   //  @Measurement(timeUnit = TimeUnit.MILLISECONDS)
