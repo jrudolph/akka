@@ -29,7 +29,7 @@ import scala.util.control.{ NoStackTrace, NonFatal }
  * INTERNAL API
  */
 private[io] abstract class TcpConnection(val tcp: TcpExt, val channel: SocketChannel, val pullMode: Boolean)
-  extends Actor with ActorLogging with RequiresMessageQueue[UnboundedMessageQueueSemantics] {
+  extends Actor with ActorLogging /*with RequiresMessageQueue[UnboundedMessageQueueSemantics]*/ {
 
   import TcpConnection._
   import tcp.Settings._

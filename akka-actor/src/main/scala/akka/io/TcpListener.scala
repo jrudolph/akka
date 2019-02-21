@@ -36,7 +36,7 @@ private[io] class TcpListener(
   channelRegistry: ChannelRegistry,
   bindCommander:   ActorRef,
   bind:            Bind)
-  extends Actor with ActorLogging with RequiresMessageQueue[UnboundedMessageQueueSemantics] {
+  extends Actor with ActorLogging /*with RequiresMessageQueue[UnboundedMessageQueueSemantics]*/ {
 
   import TcpListener._
   import tcp.Settings._
