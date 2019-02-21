@@ -16,7 +16,7 @@ object ActorBenchmark {
   final val threads = 8 // update according to cpu
   final val numMessagesPerActorPair = 1000000 // messages per actor pair
 
-  final val numActors = 512
+  final val numActors = 500
   final val totalMessages = numMessagesPerActorPair * numActors / 2
 }
 
@@ -34,6 +34,9 @@ class ActorBenchmark {
 
   @Param(Array("50"))
   var batchSize = 0
+
+  @Param(Array("4"))
+  var numSenders = 0
 
   @Param(Array("akka.dispatch.UnboundedMailbox", "akka.dispatch.SingleConsumerOnlyUnboundedMailbox", "akka.actor.ManyToOneArrayMailbox", "akka.actor.JCToolsMailbox"))
   var mailbox = ""
@@ -93,5 +96,9 @@ class ActorBenchmark {
   def echo(): Unit =
     benchmarkEchoActors(numMessagesPerActorPair, numActors, dispatcher, batchSize, timeout)
 
+  @Benchmark
+  @OperationsPerInvocation(numMessagesPerActorPair * numActors)
+  def echoGroup(): Unit =
+    benchmarkManyToOneEchoActors(numMessagesPerActorPair, numActors, numSenders, dispatcher, batchSize, timeout)
 }
 

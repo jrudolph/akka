@@ -14,6 +14,7 @@ object BenchmarkActors {
 
   val timeout = 30.seconds
 
+  case object Start
   case object Message
   case object Stop
 
@@ -52,6 +53,60 @@ object BenchmarkActors {
     private val echo = context.actorOf(Props[Echo].withDispatcher(context.props.dispatcher), "echo")
 
     private var left = messagesPerPair / 2
+    private var batch = 0
+
+    def receive = {
+      case Message ⇒
+        batch -= 1
+        if (batch <= 0) {
+          if (!sendBatch()) {
+            latch.countDown()
+            context.stop(self)
+          }
+        }
+    }
+
+    private def sendBatch(): Boolean = {
+      if (left > 0) {
+        var i = 0
+        while (i < batchSize) {
+          echo ! Message
+          i += 1
+        }
+        left -= batchSize
+        batch = batchSize
+        true
+      } else
+        false
+    }
+  }
+
+  object GroupEcho {
+    def props(numSenders: Int, messagesPerGroupMember: Int, latch: CountDownLatch, batchSize: Int): Props =
+      Props(new GroupEcho(numSenders: Int, messagesPerGroupMember, latch, batchSize))
+  }
+  class GroupEcho(numSenders: Int, messagesPerGroupMember: Int, latch: CountDownLatch, batchSize: Int) extends Actor {
+    val senders =
+      Vector.tabulate(numSenders)(i ⇒
+        context.actorOf(GroupEchoSender.props(messagesPerGroupMember, latch, batchSize, self).withDispatcher(context.props.dispatcher), s"echo-sender-$i")
+      )
+
+    def receive = {
+      case Message ⇒
+        sender() ! Message
+
+      case Start ⇒
+        senders.foreach(_ ! Message)
+    }
+  }
+
+  object GroupEchoSender {
+    def props(messagesPerGroupMember: Int, latch: CountDownLatch, batchSize: Int, echo: ActorRef): Props =
+      Props(new GroupEchoSender(messagesPerGroupMember, latch, batchSize, echo))
+  }
+
+  class GroupEchoSender(messagesPerGroupMember: Int, latch: CountDownLatch, batchSize: Int, echo: ActorRef) extends Actor {
+    private var left = messagesPerGroupMember / 2
     private var batch = 0
 
     def receive = {
@@ -159,6 +214,29 @@ object BenchmarkActors {
     val (actors, latch) = startEchoActorPairs(numMessagesPerActorPair, numPairs, dispatcher, batchSize)
     val startNanoTime = System.nanoTime()
     initiateEchoPairs(actors)
+    latch.await(shutdownTimeout.toSeconds, TimeUnit.SECONDS)
+    printProgress(totalNumMessages, numActors, startNanoTime)
+  }
+
+  private def startEchoActorGroup(messagesPerGroup: Int, numGroups: Int, numSenders: Int, dispatcher: String,
+                                  batchSize: Int)(implicit system: ActorSystem) = {
+    val fullPathToDispatcher = "akka.actor." + dispatcher
+    val latch = new CountDownLatch(numGroups * numSenders)
+    val actors = Vector.fill(numGroups) {
+      system.actorOf(GroupEcho.props(numSenders, messagesPerGroup / numSenders / 2, latch, batchSize).withDispatcher(fullPathToDispatcher))
+    }
+    (actors, latch)
+  }
+  private def initiateEchoGroup(refs: Vector[ActorRef]): Unit = {
+    refs.foreach(_ ! Start)
+  }
+
+  def benchmarkManyToOneEchoActors(numMessagesPerActorGroup: Int, numActors: Int, numSenders: Int, dispatcher: String, batchSize: Int, shutdownTimeout: Duration)(implicit system: ActorSystem): Unit = {
+    val numGroups = numActors / (numSenders + 1)
+    val totalNumMessages = numGroups * numMessagesPerActorGroup
+    val (actors, latch) = startEchoActorGroup(numMessagesPerActorGroup, numGroups, numSenders, dispatcher, batchSize)
+    val startNanoTime = System.nanoTime()
+    initiateEchoGroup(actors)
     latch.await(shutdownTimeout.toSeconds, TimeUnit.SECONDS)
     printProgress(totalNumMessages, numActors, startNanoTime)
   }
