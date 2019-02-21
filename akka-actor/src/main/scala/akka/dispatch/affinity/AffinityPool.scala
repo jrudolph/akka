@@ -12,17 +12,17 @@ import java.util.concurrent._
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.LockSupport
 import java.lang.Integer.reverseBytes
+import java.lang.invoke.MethodHandle
 
 import akka.dispatch._
 import akka.util.Helpers.Requiring
 import com.typesafe.config.Config
-
-import akka.annotation.{ InternalApi, ApiMayChange }
+import akka.annotation.{ ApiMayChange, InternalApi }
 import akka.event.Logging
 import akka.util.{ ImmutableIntMap, OptionVal, ReentrantGuard }
 
-import scala.annotation.{ tailrec, switch }
-import scala.collection.{ mutable, immutable }
+import scala.annotation.{ switch, tailrec }
+import scala.collection.{ immutable, mutable }
 import scala.util.control.NonFatal
 
 @InternalApi
@@ -43,11 +43,11 @@ private[affinity] object AffinityPool {
   final val Terminated = 5
 
   // Method handle to JDK9+ onSpinWait method
-  private val onSpinWaitMethodHandle =
+  private val onSpinWaitMethodHandle: MethodHandle =
     try
-      OptionVal.Some(MethodHandles.lookup.findStatic(classOf[Thread], "onSpinWait", methodType(classOf[Void])))
+      MethodHandles.lookup.findStatic(classOf[Thread], "onSpinWait", methodType(classOf[Void]))
     catch {
-      case NonFatal(_) ⇒ OptionVal.None
+      case NonFatal(_) ⇒ null
     }
 
   type IdleState = Int
@@ -86,10 +86,7 @@ private[affinity] object AffinityPool {
           idling = true
           transitionTo(Spinning)
         case Spinning ⇒
-          onSpinWaitMethodHandle match {
-            case OptionVal.Some(m) ⇒ m.invokeExact()
-            case OptionVal.None    ⇒
-          }
+          //if (onSpinWaitMethodHandle ne null) onSpinWaitMethodHandle.invokeExact()
           turns += 1
           if (turns > maxSpins)
             transitionTo(Yielding)
@@ -278,10 +275,10 @@ private[akka] class AffinityPool(
       @tailrec def runLoop(): Unit =
         if (!Thread.interrupted()) {
           (poolState: @switch) match {
-            case Uninitialized ⇒ ()
-            case Initializing | Running ⇒
+            case Running | Initializing ⇒
               executeNext()
               runLoop()
+            case Uninitialized ⇒ ()
             case ShuttingDown ⇒
               if (executeNext()) runLoop()
               else ()
