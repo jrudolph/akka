@@ -28,6 +28,7 @@ case class ManyToOneArrayMailbox(val capacity: Int) extends MailboxType with Pro
   def this(settings: ActorSystem.Settings, config: Config) = this(config.getInt("mailbox-capacity"))
 
   if (capacity < 0) throw new IllegalArgumentException("The capacity for ManyToOneArrayMailbox can not be negative")
+  else println(s"Mailbox created with capacity $capacity")
 
   final override def create(owner: Option[ActorRef], system: Option[ActorSystem]): MessageQueue =
     new ManyToOneArrayMessageQueue(capacity)

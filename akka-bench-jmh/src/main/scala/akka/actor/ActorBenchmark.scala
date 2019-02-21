@@ -16,7 +16,7 @@ object ActorBenchmark {
   final val threads = 8 // update according to cpu
   final val numMessagesPerActorPair = 1000000 // messages per actor pair
 
-  final val numActors = 500
+  final val numActors = 50
   final val totalMessages = numMessagesPerActorPair * numActors / 2
 }
 
@@ -44,18 +44,21 @@ class ActorBenchmark {
   @Param(Array("fjp-dispatcher")) //  @Param(Array("fjp-dispatcher", "affinity-dispatcher"))
   var dispatcher = ""
 
+  @Param(Array("5"))
+  var idleCpuLevel = 0
+
   implicit var system: ActorSystem = _
 
   @Setup(Level.Trial)
   def setup(): Unit = {
 
-    requireRightNumberOfCores(threads)
+    //requireRightNumberOfCores(threads)
 
     system = ActorSystem("ActorBenchmark", ConfigFactory.parseString(
       s"""
        akka.actor {
 
-         default-mailbox.mailbox-capacity = 512
+         default-mailbox.mailbox-capacity = 4096
 
          fjp-dispatcher {
            executor = "fork-join-executor"
@@ -74,7 +77,7 @@ class ActorBenchmark {
               parallelism-factor = 1.0
               parallelism-max = $threads
               task-queue-size = 512
-              idle-cpu-level = 5
+              idle-cpu-level = $idleCpuLevel
               fair-work-distribution.threshold = 2048
             }
             throughput = $tpt
@@ -97,7 +100,7 @@ class ActorBenchmark {
     benchmarkEchoActors(numMessagesPerActorPair, numActors, dispatcher, batchSize, timeout)
 
   @Benchmark
-  @OperationsPerInvocation(numMessagesPerActorPair * numActors)
+  @OperationsPerInvocation(numMessagesPerActorPair * numActors / 5)
   def echoGroup(): Unit =
     benchmarkManyToOneEchoActors(numMessagesPerActorPair, numActors, numSenders, dispatcher, batchSize, timeout)
 }

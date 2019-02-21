@@ -20,7 +20,9 @@ object BenchRunner {
     }
 
     val opts = new CommandLineOptions(args2: _*)
-    val results = new Runner(opts).run()
+    val runner = new Runner(opts)
+    runner.list()
+    val results = runner.run()
 
     val report = results.asScala.map { result: RunResult ⇒
       val bench = result.getParams.getBenchmark
