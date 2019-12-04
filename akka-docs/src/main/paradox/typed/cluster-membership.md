@@ -138,7 +138,8 @@ The `leader` has the following duties:
 
  * shifting members in and out of the cluster
     * joining -> up
-    * weakly up -> up *(no convergence is required for this leader action to be performed)*
+    * joining ⭢ weakly up *(no convergence is needed for this leader action to be performed which works even if there are unreachable nodes)*
+    * weakly up ⭢ up *(after full convergence is reached again)*
     * exiting -> removed
 
 #### Failure Detection and Unreachability
