@@ -1192,7 +1192,7 @@ abstract class GraphStageLogic private[stream] (val inCount: Int, val outCount: 
       def addToWaiting(): Boolean = {
         val previous = asyncCallbacksInProgress.get()
         if (previous != null) { // not stopped
-          previous.put(promise, promise)
+          previous.add(promise)
 
           // Need to read that again to make sure the stage hasn't been stopped in the meantime and the cleanup
           // process is already running.
@@ -1246,7 +1246,8 @@ abstract class GraphStageLogic private[stream] (val inCount: Int, val outCount: 
   private var callbacksWaitingForInterpreter: List[ConcurrentAsyncCallback[_]] = Nil
   // is used for two purposes: keep track of running callbacks and signal that the
   // stage has stopped to fail incoming async callback invocations by being set to null
-  private val asyncCallbacksInProgress = new AtomicReference(new ConcurrentHashMap[Promise[Done], Promise[Done]]())
+  private val asyncCallbacksInProgress: AtomicReference[java.util.Set[Promise[Done]]] =
+    new AtomicReference(ConcurrentHashMap.newKeySet[Promise[Done]]())
 
   private var _stageActor: StageActor = _
   final def stageActor: StageActor = _stageActor match {
@@ -1331,7 +1332,6 @@ abstract class GraphStageLogic private[stream] (val inCount: Int, val outCount: 
     val inProgress =
       asyncCallbacksInProgress
         .getAndSet(null) // remove reference to signify that we are in the process of shutting down
-        .keys()
         .asScala
     if (inProgress.nonEmpty) {
       val exception = streamDetachedException
